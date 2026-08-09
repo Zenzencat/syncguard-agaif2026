@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Raw dataset (~1.4GB extracted, ~375MB compressed) and derived outputs are not tracked here —
+# download the dataset per README.md, and regenerate processed/ by running the scripts.
+raw/
+processed/
