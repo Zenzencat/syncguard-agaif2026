@@ -23,6 +23,10 @@ Full background, methodology, and honest limitations are in [`project_abstract.m
 | `baseline_model_report.md` | Model results: precision/recall/F1 per class, confusion matrix, ROC/PR-AUC, per-attack-type recall, feature importances. |
 | `project_abstract.md` | The full AGAIF submission abstract (problem, solution, methodology, results, impact, AI usage disclosure). |
 | `plots/` | `scenario_2.1.1_clean_vs_spoofed.png` (sanity-check plot) and `baseline_model_results.png` (confusion matrix + feature importances). |
+| `build_spatial_simulation.py` | Adds a spatial layer on top of the (unmodified) detector above: real Telkomsel tower locations + a SIMULATED severity/spread overlay. Writes `spatial_processed/`. |
+| `spatial_layer_notes.md` | Full methodology for the spatial layer, and the exact REAL/SIMULATED split — read this before the spatial outputs below. |
+| `spatial_processed/` | Spatial layer outputs: `simulated_spatial_anomaly_SIMULATED.csv` (per-tower severity/rank), `spatial_anomaly_map_SIMULATED.png`, `spatial_anomaly_spread_over_time_SIMULATED.png`. |
+| `syncguard_interactive_summary.html` | Self-contained, offline interactive companion (Plotly map + time-step spread control + detector evidence panel) — open directly in a browser, no build step. |
 
 **Not included in this repo**: the raw dataset (~375MB compressed, ~1.4GB extracted) and the
 `processed/` feature CSVs/Parquet it produces — both are excluded for size and are
@@ -74,13 +78,56 @@ Run in this order from the repo root (with the venv activated):
 
 ```bash
 python extract_features.py       # raw scenario logs -> processed/syncguard_features.{csv,parquet}
-python sanity_check.py           # stats + regenerates plots/scenario_2.1.1_clean_vs_spoofed.png
-python train_baseline_model.py   # trains the RandomForest baseline, writes baseline_model_report.md
+python sanity_check.py           # stats + regenerates processed/scenario_2.1.1_clean_vs_spoofed.png
+python train_baseline_model.py   # trains the RandomForest baseline, writes baseline_model_report.md + processed/baseline_model_results.png
 ```
 
 `extract_features.py` must run first — it produces `processed/syncguard_features.parquet`,
 which both other scripts read. Expect a few minutes total; `extract_features.py` processes 24
-scenarios (~1.4GB of CSVs).
+scenarios (~1.4GB of CSVs). Both plots regenerate into `processed/` (gitignored, not
+committed, since it also holds the large feature CSV/Parquet) — the copies committed under
+`plots/` are snapshots included for convenience so the results are visible without running
+anything.
+
+## Spatial layer — REAL tower coordinates, SIMULATED severity/spread
+
+**The detector above is REAL and validated, and is never retrained or modified by this
+step.** `build_spatial_simulation.py` adds a separate, clearly-labeled spatial layer on top
+of it, answering *where* anomalies occur, whether *neighbouring sites* are correlated, and
+*which sites to prioritize* — none of which a per-recording detector can show on its own:
+
+- **REAL**: 136 real PT. Telkomsel cellular base-station sites (Kubu Raya and Pontianak, West
+  Kalimantan, Indonesia) — coordinates, site IDs, and names. Also REAL: the severity *scale*,
+  anchored to the detector's own `predict_proba()` output range on the held-out set (median
+  clean-row proba as the floor, 90th-percentile attack-row proba as the ceiling).
+- **SIMULATED**: which site is the spoofing epicenter, and how severity spreads to nearby
+  sites over time. No public dataset of real ASEAN base-station GNSS timing under spoofing
+  exists (see `dataset_notes.md`), so this spread is a documented distance-decay
+  simplification, not measured data.
+
+Full methodology, exact formula, and every parameter choice: [`spatial_layer_notes.md`](spatial_layer_notes.md).
+Every derived column/file this step produces is suffixed `_SIMULATED` so the real/simulated
+line can't be lost by truncation or a later rename. Outputs land in `spatial_processed/`
+(already included in this repo — see the table above).
+
+```bash
+python build_spatial_simulation.py   # run after train_baseline_model.py (reads processed/syncguard_features.parquet)
+```
+
+Regenerating `spatial_processed/` from scratch additionally requires
+`menaratelepon_ar_50k.csv` (the real Telkomsel tower dataset, from the AGAIF bootcamp's
+Module 6/AD1002 materials) at `spatial_raw/Module 6_AD1002_Dataset (Tower)/` — **not included
+in this repo**. The outputs already committed under `spatial_processed/` don't require this
+file; it's only needed to rerun the script.
+
+## Interactive summary
+
+[`syncguard_interactive_summary.html`](syncguard_interactive_summary.html) is a single
+self-contained HTML file — download it and open it directly in a browser (or `file://` it),
+no server or build step required. It lets judges explore the severity map (with the t=0..3
+spread control) and the detector evidence panel (confusion matrix, feature importances)
+independently of the slide deck. Same REAL/SIMULATED labeling as above, shown directly in the
+UI, not just in a caption.
 
 ## Results
 
@@ -89,6 +136,7 @@ recall/F1 per class, confusion matrix, ROC-AUC 0.916, PR-AUC 0.968, per-attack-t
 feature importances) and [`plots/baseline_model_results.png`](plots/baseline_model_results.png)
 for the confusion matrix + feature importance chart. `dataset_notes.md` and
 `plots/scenario_2.1.1_clean_vs_spoofed.png` cover the earlier feature-sanity-check stage.
+`spatial_layer_notes.md` and `spatial_processed/` cover the spatial layer (see above).
 `project_abstract.md` is the submission-ready summary of all of the above.
 
 ## License

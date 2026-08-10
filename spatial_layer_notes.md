@@ -93,7 +93,7 @@ state both halves of that sentence together — never just the first half.
 
 ## Outputs
 
-All in `agaif-materials/dataset/spatial_processed/`:
+All in `spatial_processed/` (repo root):
 
 - `simulated_spatial_anomaly_SIMULATED.csv` — per-site table: real `site_id`/`site_name`/
   `desa`/`kec`/`lat`/`lon`, real `distance_from_epicenter_km`, and the three SIMULATED
@@ -106,10 +106,13 @@ All in `agaif-materials/dataset/spatial_processed/`:
   epicenter's neighborhood, showing the flagged count growing 3 → 6 → 12 → 21 across the
   illustrative time steps.
 
-Regenerate with:
+These outputs are already committed to this repo. Regenerate with (from the repo root, venv
+activated per the main README):
 ```
-cd agaif-materials/dataset
-.venv/Scripts/python.exe build_spatial_simulation.py
+python build_spatial_simulation.py
 ```
 Runs in well under a minute (headless `Agg` backend, no network calls, no live geocoding —
-the tower CSV already has lat/long).
+the tower CSV already has lat/long), but requires `processed/syncguard_features.parquet`
+(from `extract_features.py`) and the real tower CSV noted above, at
+`spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv` — neither is included
+in this repo (see the main README's "Spatial layer" section).

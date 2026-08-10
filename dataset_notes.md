@@ -46,8 +46,9 @@ Sayyaf, M. I., Ortiz, M., & Renaudin, V. (2025). Zenodo. https://doi.org/10.5281
   Alternative Indoor and Seamless Navigation Technologies," IEEE Journal of Indoor and Seamless
   Positioning and Navigation, doi: 10.1109/JISPIN.2025.3629705.
 - **Size**: 375.3 MB compressed (`GNSS_DATASET_JAMMING_SPOOFING.tar.gz`), ~1.4 GB extracted.
-  Downloaded to `agaif-materials/dataset/raw/`, md5 verified against the checksum published on
-  the Zenodo page (`c7b00c63bb1ee5db80c7692a2b06e169`) — matched exactly.
+  Downloaded to `raw/` (repo root — see main README's "Setup"), md5 verified against the
+  checksum published on the Zenodo page (`c7b00c63bb1ee5db80c7692a2b06e169`) — matched
+  exactly.
 - **Content**: real u-blox GNSS receiver logs recorded during Jammertest 2024 (Andøya Space
   Defense test range, Bleik, Norway), across 24 scenarios covering Jamming (7), Spoofing (8),
   Meaconing (5), and combined Jamming+Spoofing (4) attacks, at multiple power levels and
@@ -73,10 +74,10 @@ explicitly.
 
 ## Processing pipeline
 
-Python-only, no MATLAB. Scripts:
-- `agaif-materials/dataset/extract_features.py` — feature extraction across all 24 scenarios.
-- `agaif-materials/dataset/sanity_check.py` — stats, sample rows, clean-vs-spoofed plot.
-- Environment: `agaif-materials/dataset/.venv` (numpy, pandas, matplotlib, pyarrow).
+Python-only, no MATLAB. Scripts (repo root — see main README for setup/run order):
+- `extract_features.py` — feature extraction across all 24 scenarios.
+- `sanity_check.py` — stats, sample rows, clean-vs-spoofed plot.
+- Environment: `.venv` per `requirements.txt` (numpy, pandas, matplotlib, pyarrow).
 
 ### Features extracted (per ~1 Hz epoch, from `nav_pvt.csv` timeline)
 
@@ -104,13 +105,14 @@ dataset's IEEE paper if time allows before the model-training phase.
 
 ### Output
 
-`agaif-materials/dataset/processed/syncguard_features.csv` and `.parquet`:
+`processed/syncguard_features.csv` and `.parquet` (repo root, gitignored — regenerate via
+`extract_features.py`, see main README):
 - **44,639 rows** across 24 scenarios (Spoofing 16,357 / Jamming 13,771 / Meaconing 7,471 /
   Jamming+Spoofing 7,040 rows).
 - **34,290 attack rows (77%) vs. 10,349 clean rows (23%)** — meaningful class imbalance to
   account for when training (these are attack-focused recordings with a short clean
   prelude/tail, not balanced clean/attack captures).
-- `agaif-materials/dataset/processed/scenario_2.1.1_clean_vs_spoofed.png` — sanity plot,
+- `processed/scenario_2.1.1_clean_vs_spoofed.png` (committed snapshot: `plots/scenario_2.1.1_clean_vs_spoofed.png`) — sanity plot,
   stationary spoofing scenario, clean vs. spoofed shaded. C/N0 visibly drops (44→as low as
   32 dB-Hz) during the spoofed window; code-Doppler residual std jumps from near-0 to
   100–700+ m/s; position deviation peaks at ~90m near the end of the spoof window (matching
