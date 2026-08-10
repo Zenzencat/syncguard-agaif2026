@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SyncGuard — Evaluation &amp; Spatial Layer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<style>
+  :root{
+    --bg:#0A121C; --panel:#111c2b; --panel-border:#263647;
+    --text:#EAF1F7; --muted:#94A7BA;
+    --real:#3fb8af; --real-bg:#0f2a29; --real-border:#1f6b64;
+    --sim:#FF8A3D; --sim-bg:#2a1c0f; --sim-border:#a8541c;
+    --accent:#FF4D68;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:Calibri,Arial,sans-serif; line-height:1.45;
+  }
+  header{
+    padding:28px clamp(16px,4vw,48px) 18px; border-bottom:1px solid var(--panel-border);
+  }
+  header h1{margin:0 0 6px; font-size:28px; font-weight:700;}
+  header p.sub{margin:0; color:var(--muted); font-size:15px; max-width:900px;}
+  .legend{
+    display:flex; gap:14px; flex-wrap:wrap; margin-top:16px;
+  }
+  .legend .badge{
+    display:flex; align-items:center; gap:8px; padding:8px 14px; border-radius:8px;
+    font-size:13px; font-weight:600; letter-spacing:.02em;
+  }
+  .badge.real{background:var(--real-bg); border:1px solid var(--real-border); color:var(--real);}
+  .badge.sim{background:var(--sim-bg); border:1px solid var(--sim-border); color:var(--sim);}
+  .badge .dot{width:10px; height:10px; border-radius:50%; background:currentColor; flex:none;}
+  main{padding:24px clamp(16px,4vw,48px) 60px; display:flex; flex-direction:column; gap:28px;}
+  section.card{
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:12px;
+    padding:22px clamp(14px,3vw,28px);
+  }
+  section.card.real-zone{border-color:var(--real-border);}
+  section.card.sim-zone{border-color:var(--sim-border);}
+  .zone-tag{
+    display:inline-block; font-size:11px; font-weight:800; letter-spacing:.08em;
+    text-transform:uppercase; padding:4px 10px; border-radius:6px; margin-bottom:10px;
+  }
+  .zone-tag.sim{background:var(--sim-bg); color:var(--sim); border:1px solid var(--sim-border);}
+  .zone-tag.real{background:var(--real-bg); color:var(--real); border:1px solid var(--real-border);}
+  h2{margin:2px 0 4px; font-size:20px;}
+  h3{margin:18px 0 8px; font-size:15px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.04em;}
+  p.note{color:var(--muted); font-size:13.5px; margin:6px 0 0;}
+  .controls{
+    display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin:16px 0 6px;
+    background:#0d1622; border:1px solid var(--panel-border); border-radius:10px; padding:14px 18px;
+  }
+  .controls label{font-size:13px; color:var(--muted); font-weight:600;}
+  .controls input[type=range]{width:min(360px,60vw); accent-color:var(--sim);}
+  .tstep-btns{display:flex; gap:6px;}
+  .tstep-btns button{
+    background:#182636; color:var(--text); border:1px solid var(--panel-border); border-radius:6px;
+    padding:6px 12px; cursor:pointer; font-size:13px; font-weight:600;
+  }
+  .tstep-btns button.active{background:var(--sim-bg); border-color:var(--sim-border); color:var(--sim);}
+  .counter{
+    font-size:14px; font-weight:700; color:var(--sim); background:var(--sim-bg);
+    border:1px solid var(--sim-border); padding:8px 14px; border-radius:8px;
+  }
+  .counter span{font-size:20px; margin-right:4px;}
+  #map{width:100%; height:560px;}
+  .grid2{display:grid; grid-template-columns:1.1fr .9fr; gap:22px;}
+  @media (max-width:900px){ .grid2{grid-template-columns:1fr;} }
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  th,td{padding:7px 10px; text-align:right; border-bottom:1px solid var(--panel-border);}
+  th:first-child,td:first-child{text-align:left; color:var(--muted);}
+  thead th{color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em;}
+  .cm-table td, .cm-table th{text-align:center;}
+  .cm-table .diag{background:rgba(63,184,175,.14); font-weight:700;}
+  .cm-table .offdiag{background:rgba(255,77,104,.10);}
+  .stat-row{display:flex; gap:26px; flex-wrap:wrap; margin:12px 0 4px;}
+  .stat{min-width:110px;}
+  .stat .v{font-size:22px; font-weight:800;}
+  .stat .l{font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em;}
+  footer{padding:18px clamp(16px,4vw,48px) 40px; color:var(--muted); font-size:12.5px; border-top:1px solid var(--panel-border);}
+  #fi-chart, #cm-chart{width:100%; height:380px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SyncGuard — Detector Evidence &amp; Spatial Layer</h1>
+  <p class="sub">Interactive companion to the pitch deck. GNSS spoofing/jamming/meaconing detection for 4G/5G base-station timing infrastructure, evaluated on the real Jammertest 2024 (Zenodo) dataset, mapped onto real ASEAN telecom tower locations.</p>
+  <div class="legend">
+    <div class="badge real"><span class="dot"></span>REAL — Jammertest 2024 GNSS recordings, 136 Telkomsel tower sites (Kubu Raya / Pontianak, Indonesia), RandomForest detector evidence</div>
+    <div class="badge sim"><span class="dot"></span>SIMULATED — spoofing epicenter, distance-decay severity, spread over time, priority ranking</div>
+  </div>
+</header>
+
+<main>
+
+  <section class="card sim-zone" id="map-section">
+    <span class="zone-tag sim">Simulated spatial layer, on real tower coordinates</span>
+    <h2>Spatial anomaly severity map</h2>
+    <p class="note">Marker <strong>positions</strong> are the 136 real Telkomsel base-station coordinates. Marker <strong>color/size (severity), the blue epicenter star, and the spread over time</strong> are a documented simulation — no public dataset of real ASEAN base-station GNSS timing under spoofing exists, so this distance-decay spread stands in for "nearby infrastructure sharing correlated timing anomalies." Severity is anchored to the real detector's own <code>predict_proba()</code> range: floor 0.430 (median proba on real held-out clean rows) to ceiling 0.993 (90th-percentile proba on real held-out attack rows) — not invented numbers.</p>
+
+    <div class="controls">
+      <label for="tslider">Illustrative time step (SIMULATED spread widening)</label>
+      <input type="range" id="tslider" min="0" max="3" step="1" value="0">
+      <div class="tstep-btns" id="tbtns"></div>
+      <div class="counter"><span id="flagcount">0</span>/136 towers flagged anomalous (SIMULATED severity ≥ 0.5)</div>
+    </div>
+
+    <div id="map"></div>
+    <p class="note">Hover a marker for site ID, name, SIMULATED severity at the selected time step, distance from the SIMULATED epicenter, and priority rank. Blue star = SIMULATED epicenter (deterministic: real site nearest the 136-site cluster's geometric centroid). Labels = current top-5 SIMULATED priority sites.</p>
+  </section>
+
+  <section class="card real-zone" id="evidence-section">
+    <span class="zone-tag real">Real, validated detector evidence — not simulated</span>
+    <h2>Detector evaluation (held-out Jammertest 2024 recordings)</h2>
+    <p class="note">RandomForest (300 trees, class-weight balanced), trained/tested on real GNSS receiver logs, split by recording (not by row) to avoid leakage. One dynamic + one stationary held-out recording per attack type (Jamming, Meaconing, Spoofing, Spoofing+Jamming).</p>
+
+    <div class="stat-row" id="headline-stats"></div>
+
+    <div class="grid2">
+      <div>
+        <h3>Confusion matrix — held-out set (rows = true, cols = predicted)</h3>
+        <table class="cm-table" id="cm-table"></table>
+        <h3>Per-attack-type recall — true attack rows only</h3>
+        <table id="attack-table"></table>
+      </div>
+      <div>
+        <h3>Top feature importances (RandomForest, 23 features total)</h3>
+        <div id="fi-chart"></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  Team Lorem Ipsum (HACK_TH_001 / HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · Data sourced verbatim from <code>baseline_model_report.md</code>, <code>simulated_spatial_anomaly_SIMULATED.csv</code>, and <code>spatial_layer_notes.md</code> — no live model calls, no external data fetches. Self-contained, works offline.
+</footer>
+
+<script>
+const DATA = {"meta": {"floor": 0.43, "ceiling": 0.9933333333333332, "decay_km_base": 2.0, "n_snapshots": 4, "epicenter_site_id": "16MPW043", "epicenter_site_name": "Rd To Rasau Jaya", "flagged_counts": [3, 6, 12, 21], "n_towers": 136}, "towers": [{"id": "16MPW043", "name": "Rd To Rasau Jaya", "desa": "Rasau Jaya", "kec": "Rasau Jaya", "lat": -0.211735, "lon": 109.393508, "dist_km": 0.0, "sev": [0.9933, 0.9933, 0.9933, 0.9933], "flagged": [true, true, true, true], "rank": [1, 1, 1, 1]}, {"id": "MPW059", "name": "BINA KARYA", "desa": "Rasau Jaya 1", "kec": "Rasau Jaya", "lat": -0.225194, "lon": 109.387917, "dist_km": 1.6206, "sev": [0.6531, 0.7246, 0.7721, 0.8057], "flagged": [true, true, true, true], "rank": [2, 2, 2, 2]}, {"id": "140195", "name": "SECUNDER C", "desa": "Rasau Jaya 1", "kec": "Rasau Jaya", "lat": -0.232, "lon": 109.382, "dist_km": 2.5914, "sev": [0.5581, 0.6298, 0.6838, 0.7247], "flagged": [true, true, true, true], "rank": [3, 3, 3, 3]}, {"id": "16MPW006", "name": "Pasar Rasau Jaya", "desa": "Rasau Jaya 1", "kec": "Rasau Jaya", "lat": -0.248306, "lon": 109.371583, "dist_km": 4.7413, "sev": [0.4675, 0.5146, 0.561, 0.6022], "flagged": [false, true, true, true], "rank": [4, 4, 4, 4]}, {"id": "KAL-WKL-0008-X-P", "name": "RASAU JAYA", "desa": "Rasau Jaya 1", "kec": "Rasau Jaya", "lat": -0.25177, "lon": 109.37033, "dist_km": 5.1439, "sev": [0.4598, 0.502, 0.5457, 0.5857], "flagged": [false, true, true, true], "rank": [5, 5, 5, 5]}, {"id": "C415", "name": "Rasau Jaya", "desa": "Rasau Jaya 1", "kec": "Rasau Jaya", "lat": -0.252361, "lon": 109.371, "dist_km": 5.1644, "sev": [0.4595, 0.5014, 0.545, 0.5849], "flagged": [false, true, true, true], "rank": [6, 6, 6, 6]}, {"id": "140134", "name": "RASAU JAYA III", "desa": "Rasau Jaya 3", "kec": "Rasau Jaya", "lat": -0.245, "lon": 109.356, "dist_km": 5.5746, "sev": [0.4533, 0.4906, 0.5314, 0.5698], "flagged": [false, false, true, true], "rank": [7, 7, 7, 7]}, {"id": "200116109", "name": "NEW_KUALADUA", "desa": "Kuala Dua", "kec": "Sui Raya", "lat": -0.18737, "lon": 109.44364, "dist_km": 6.1979, "sev": [0.4463, 0.4772, 0.5137, 0.5496], "flagged": [false, false, true, true], "rank": [8, 8, 8, 8]}, {"id": "16MPW010", "name": "sei_kumpai", "desa": "Kuala Dua", "kec": "Sungai Raya", "lat": -0.174083, "lon": 109.435889, "dist_km": 6.3037, "sev": [0.4454, 0.4753, 0.511, 0.5465], "flagged": [false, false, true, true], "rank": [9, 9, 9, 9]}, {"id": "KAL-WKL-0001-M-B", "name": "Bandara supadio", "desa": "Kuala Dua", "kec": "Sungai Raya", "lat": -0.17378, "lon": 109.43591, "dist_km": 6.3279, "sev": [0.4451, 0.4748, 0.5104, 0.5458], "flagged": [false, false, true, true], "rank": [10, 10, 10, 10]}, {"id": "MPW012", "name": "KUALA_DUA", "desa": "Kuala Dua", "kec": "Sungai Raya", "lat": -0.172583, "lon": 109.434944, "dist_km": 6.3389, "sev": [0.4451, 0.4746, 0.5101, 0.5455], "flagged": [false, false, true, true], "rank": [11, 11, 11, 11]}, {"id": "KAL-WKL-0012-H-P", "name": "KARYA II", "desa": "Kuala Dua", "kec": "Sungai Raya", "lat": -0.19685, "lon": 109.4504, "dist_km": 6.539, "sev": [0.4434, 0.4712, 0.5053, 0.5399], "flagged": [false, false, true, true], "rank": [12, 12, 12, 12]}, {"id": "PELABUHAN RASAU", "name": "PELABUHAN RASAU", "desa": "Rasau Jaya", "kec": "Rasau Jaya", "lat": -0.264431, "lon": 109.362325, "dist_km": 6.8086, "sev": [0.4415, 0.467, 0.4993, 0.5327], "flagged": [false, false, false, true], "rank": [13, 13, 13, 13]}, {"id": "tbg", "name": "SIMP_RASAUJAYA", "desa": "Kuala Dua", "kec": "Sui Raya", "lat": -0.15453, "lon": 109.41719, "dist_km": 6.8844, "sev": [0.441, 0.4659, 0.4977, 0.5308], "flagged": [false, false, false, true], "rank": [14, 14, 14, 14]}, {"id": "140103", "name": "H104", "desa": "Kuala Dua", "kec": "Sungai Raya", "lat": -0.15494, "lon": 109.42361, "dist_km": 7.1475, "sev": [0.4395, 0.4623, 0.4925, 0.5243], "flagged": [false, false, false, true], "rank": [15, 15, 15, 15]}, {"id": "tbg", "name": "BANDARA SUPADIO", "desa": "Limbung", "kec": "Sui Raya", "lat": -0.142833, "lon": 109.413, "dist_km": 7.9622, "sev": [0.436, 0.4533, 0.4786, 0.507], "flagged": [false, false, false, true], "rank": [16, 16, 16, 16]}, {"id": "16MPW001", "name": "airport_pontianak", "desa": "Arang Limbung", "kec": "Sungai Raya", "lat": -0.141472, "lon": 109.410139, "dist_km": 8.0288, "sev": [0.4357, 0.4527, 0.4776, 0.5057], "flagged": [false, false, false, true], "rank": [17, 17, 17, 17]}, {"id": "3405", "name": "Airport Pontianak", "desa": "Arang Limbung", "kec": "Sui Raya", "lat": -0.141028, "lon": 109.41, "dist_km": 8.0733, "sev": [0.4356, 0.4523, 0.477, 0.5049], "flagged": [false, false, false, true], "rank": [18, 18, 18, 18]}, {"id": "MPW011", "name": "PONTIANAK_AIRPORT", "desa": "Arang Limbung", "kec": "Sungai Raya", "lat": -0.141111, "lon": 109.410361, "dist_km": 8.0735, "sev": [0.4356, 0.4523, 0.477, 0.5049], "flagged": [false, false, false, true], "rank": [19, 19, 19, 19]}, {"id": "140055", "name": "MEKAR SARI PTK", "desa": "Mekar Sari", "kec": "Sungai Raya", "lat": -0.21528, "lon": 109.46794, "dist_km": 8.2858, "sev": [0.4349, 0.4505, 0.474, 0.501], "flagged": [false, false, false, true], "rank": [20, 20, 20, 20]}, {"id": "MPW054", "name": "DS MEKAR SARI EX KUALA DUA-CAP EX BALAI BERKUAK", "desa": "Mekar Sari", "kec": "Sungai Raya", "lat": -0.21525, "lon": 109.468, "dist_km": 8.2923, "sev": [0.4349, 0.4504, 0.4739, 0.5009], "flagged": [false, false, false, true], "rank": [21, 21, 21, 21]}, {"id": "KAL-WKL-0108-H-B", "name": "Limbung", "desa": "Limbung", "kec": "Sungai Raya", "lat": -0.13563, "lon": 109.40895, "dist_km": 8.6349, "sev": [0.4341, 0.4478, 0.4695, 0.495], "flagged": [false, false, false, false], "rank": [22, 22, 22, 22]}, {"id": "KAL-WKL-0096-T-B", "name": "Site_4853", "desa": "Arang Limbung", "kec": "Sungai Raya", "lat": -0.12651, "lon": 109.40302, "dist_km": 9.5354, "sev": [0.4324, 0.4424, 0.46, 0.4819], "flagged": [false, false, false, false], "rank": [23, 23, 23, 23]}, {"id": "16MPW054", "name": "Sungai Ambangah", "desa": "Sungai Ambangah", "kec": "Sungai Raya", "lat": -0.136614, "lon": 109.437819, "dist_km": 9.698, "sev": [0.4322, 0.4416, 0.4585, 0.4799], "flagged": [false, false, false, false], "rank": [24, 24, 24, 24]}, {"id": "tbg", "name": "TB_ADISUCIPTO KM14.5 EX  ARANG LIMBUNG SEC-1", "desa": "Arang Limbung", "kec": "Sui Raya", "lat": -0.12561, "lon": 109.41011, "dist_km": 9.753, "sev": [0.4321, 0.4414, 0.458, 0.4792], "flagged": [false, false, false, false], "rank": [25, 25, 25, 25]}, {"id": "tbg", "name": "TB_GG WONODADI EX ROAD PONTIANAK AIRPORT TO SUNGAI RAYA DALAM", "desa": "Arang Limbung", "kec": "Sui Raya", "lat": -0.11835, "lon": 109.39771, "dist_km": 10.3945, "sev": [0.4315, 0.4388, 0.453, 0.4719], "flagged": [false, false, false, false], "rank": [26, 26, 26, 26]}, {"id": "140100", "name": "ARANG JAYA", "desa": "Arang Limbung", "kec": "Sungai Raya", "lat": -0.11382, "lon": 109.41023, "dist_km": 11.0453, "sev": [0.431, 0.4368, 0.4488, 0.4656], "flagged": [false, false, false, false], "rank": [27, 27, 27, 27]}, {"id": "140141", "name": "ARANG LIMBUNG 3", "desa": "Arang Limbung", "kec": "Sungai Raya", "lat": -0.1111, "lon": 109.39514, "dist_km": 11.1916, "sev": [0.4309, 0.4364, 0.448, 0.4643], "flagged": [false, false, false, false], "rank": [28, 28, 28, 28]}, {"id": "MPW015", "name": "ARANG_LIMBUNG", "desa": "Arang Limbung", "kec": "Sungai Raya", "lat": -0.110944, "lon": 109.409833, "dist_km": 11.3535, "sev": [0.4309, 0.436, 0.4471, 0.463], "flagged": [false, false, false, false], "rank": [29, 29, 29, 29]}, {"id": "3412", "name": "Sungai Raya", "desa": "Sui Raya", "kec": "Sui Raya", "lat": -0.109472, "lon": 109.388, "dist_km": 11.3876, "sev": [0.4308, 0.4359, 0.4469, 0.4627], "flagged": [false, false, false, false], "rank": [30, 30, 30, 30]}, {"id": "KAL-WKL-0005-X-P", "name": "AHMAD YANI ROAD", "desa": "Arang Limbung", "kec": "Sungai Raya", "lat": -0.10711, "lon": 109.38944, "dist_km": 11.6426, "sev": [0.4307, 0.4353, 0.4457, 0.4607], "flagged": [false, false, false, false], "rank": [31, 31, 31, 31]}, {"id": "MPW053", "name": "PERUM_TELUK_MULUS", "desa": "Teluk Kapuas", "kec": "Sungai Raya", "lat": -0.105417, "lon": 109.397917, "dist_km": 11.8322, "sev": [0.4307, 0.435, 0.4448, 0.4592], "flagged": [false, false, false, false], "rank": [32, 32, 32, 32]}, {"id": "16PTK017", "name": "arang_limbung", "desa": "Arang Limbung", "kec": "Sungai Raya", "lat": -0.10325, "lon": 109.407444, "dist_km": 12.1621, "sev": [0.4305, 0.4343, 0.4434, 0.4569], "flagged": [false, false, false, false], "rank": [33, 33, 33, 33]}, {"id": "tbg", "name": "TB_PARIT CAB KIRI EX ROAD SEI RAYA TO PTK AIRPORT", "desa": "Teluk Kapuas", "kec": "Sui Raya", "lat": -0.10232, "lon": 109.38448, "dist_km": 12.2078, "sev": [0.4305, 0.4343, 0.4432, 0.4566], "flagged": [false, false, false, false], "rank": [34, 34, 34, 34]}, {"id": "KAL-WKL-0010-M-B", "name": "Arang Limbung", "desa": "Arang Limbung", "kec": "Sungai Raya", "lat": -0.10219, "lon": 109.40908, "dist_km": 12.3033, "sev": [0.4305, 0.4341, 0.4428, 0.456], "flagged": [false, false, false, false], "rank": [35, 35, 35, 35]}, {"id": "tbg", "name": "KOMP_BTN_TELUKMULUS", "desa": "Teluk Kapuas", "kec": "Sui Raya", "lat": -0.1004, "lon": 109.40313, "dist_km": 12.4261, "sev": [0.4305, 0.4339, 0.4423, 0.4552], "flagged": [false, false, false, false], "rank": [36, 36, 36, 36]}, {"id": "KAL-WKL-0143-T-B", "name": "GG_PARAH ex RA_KARTINI", "desa": "Parit Baru", "kec": "Sungai Raya", "lat": -0.09516, "lon": 109.37697, "dist_km": 13.0924, "sev": [0.4303, 0.433, 0.44, 0.4513], "flagged": [false, false, false, false], "rank": [37, 37, 37, 37]}, {"id": "16PTK066", "name": "Teluk Mulus", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.093361, "lon": 109.39275, "dist_km": 13.1629, "sev": [0.4303, 0.4329, 0.4398, 0.451], "flagged": [false, false, false, false], "rank": [38, 38, 38, 38]}, {"id": "2111022", "name": "Ahmad Yani Road", "desa": "Madu Sari", "kec": "Sui Raya", "lat": -0.094139, "lon": 109.379, "dist_km": 13.1752, "sev": [0.4303, 0.4329, 0.4398, 0.4509], "flagged": [false, false, false, false], "rank": [39, 39, 39, 39]}, {"id": "MPW017", "name": "SEI_RAYA_3** / ADI SUCIPTO", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.093222, "lon": 109.393278, "dist_km": 13.1781, "sev": [0.4303, 0.4329, 0.4398, 0.4509], "flagged": [false, false, false, false], "rank": [40, 40, 40, 40]}, {"id": "16PTK071", "name": "Bintang Mas", "desa": "Bintang Mas", "kec": "Rasau Jaya", "lat": -0.268565, "lon": 109.286218, "dist_km": 13.5003, "sev": [0.4303, 0.4325, 0.4388, 0.4493], "flagged": [false, false, false, false], "rank": [41, 41, 41, 41]}, {"id": "MPW075", "name": "BINTANG MAS", "desa": "Bintang Mas 2", "kec": "Rasau Jaya", "lat": -0.266944, "lon": 109.281944, "dist_km": 13.8411, "sev": [0.4302, 0.4322, 0.438, 0.4477], "flagged": [false, false, false, false], "rank": [42, 42, 42, 42]}, {"id": "16PTK006", "name": "sungai_raya (PIL)", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.086472, "lon": 109.376222, "dist_km": 14.0606, "sev": [0.4302, 0.432, 0.4374, 0.4468], "flagged": [false, false, false, false], "rank": [43, 43, 43, 43]}, {"id": "MPW010", "name": "STO_SUNGAI_RAYA / SUNGAI RAYA", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.08625, "lon": 109.3755, "dist_km": 14.0963, "sev": [0.4302, 0.432, 0.4374, 0.4466], "flagged": [false, false, false, false], "rank": [44, 44, 44, 44]}, {"id": "KAL-WKL-0092-H-B", "name": "A Yani II", "desa": "Sungai Raya Dalam", "kec": "Sungai Raya", "lat": -0.08732, "lon": 109.36707, "dist_km": 14.1432, "sev": [0.4302, 0.432, 0.4373, 0.4464], "flagged": [false, false, false, false], "rank": [45, 45, 45, 45]}, {"id": "2111021", "name": "Pasar Sei Raya Infill", "desa": "Sui Raya", "kec": "Sui Raya", "lat": -0.083444, "lon": 109.387528, "dist_km": 14.2808, "sev": [0.4302, 0.4319, 0.437, 0.4459], "flagged": [false, false, false, false], "rank": [46, 46, 46, 46]}, {"id": "PTK016", "name": "SUNGAI_RAYA_DALAM", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.090778, "lon": 109.349056, "dist_km": 14.3293, "sev": [0.4302, 0.4318, 0.4369, 0.4457], "flagged": [false, false, false, false], "rank": [47, 47, 47, 47]}, {"id": "16MPW050", "name": "kampung_kapur", "desa": "Kapur", "kec": "Sungai Raya", "lat": -0.080167, "lon": 109.401472, "dist_km": 14.6565, "sev": [0.4301, 0.4316, 0.4362, 0.4444], "flagged": [false, false, false, false], "rank": [48, 48, 48, 48]}, {"id": "140368", "name": "NURUL HUDA", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.0798, "lon": 109.3791, "dist_km": 14.7577, "sev": [0.4301, 0.4315, 0.436, 0.4441], "flagged": [false, false, false, false], "rank": [49, 49, 49, 49]}, {"id": "KAL-WKL-0106-H-B", "name": "Sei Raya", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.07499, "lon": 109.37604, "dist_km": 15.3289, "sev": [0.4301, 0.4312, 0.435, 0.4422], "flagged": [false, false, false, false], "rank": [50, 50, 50, 50]}, {"id": "MPW020", "name": "A_YANI_II / PURNAMA_2", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.075167, "lon": 109.364778, "dist_km": 15.5181, "sev": [0.4301, 0.4311, 0.4348, 0.4416], "flagged": [false, false, false, false], "rank": [51, 51, 51, 51]}, {"id": "KAL-WKL-0123-H-B", "name": "Sungai Raya Dalam ll", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.0745, "lon": 109.359, "dist_km": 15.7349, "sev": [0.4301, 0.431, 0.4344, 0.441], "flagged": [false, false, false, false], "rank": [52, 52, 52, 52]}, {"id": "MPW063", "name": "TANJUNG RAYA II / DENZIBANG II / DESA KAPUR", "desa": "Kapur", "kec": "Sungai Raya", "lat": -0.070222, "lon": 109.390333, "dist_km": 15.7395, "sev": [0.4301, 0.431, 0.4344, 0.441], "flagged": [false, false, false, false], "rank": [53, 53, 53, 53]}, {"id": "PTK049", "name": "GUBERNURAN_2/ DENZIBANG (MPW016)", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.067611, "lon": 109.37125, "dist_km": 16.2159, "sev": [0.4301, 0.4309, 0.4338, 0.4398], "flagged": [false, false, false, false], "rank": [54, 54, 54, 54]}, {"id": "tbg", "name": "PEREMPATAN,SEI RAYA DLM JL. A.YANI", "desa": "Sui Raya", "kec": "Sui Raya", "lat": -0.06922, "lon": 109.36237, "dist_km": 16.2208, "sev": [0.4301, 0.4309, 0.4338, 0.4398], "flagged": [false, false, false, false], "rank": [55, 55, 55, 55]}, {"id": "16PTK038", "name": "parit_mayor/Kp Kapur", "desa": "Kapur", "kec": "Sungai Raya", "lat": -0.062829, "lon": 109.380935, "dist_km": 16.6165, "sev": [0.43, 0.4307, 0.4334, 0.4388], "flagged": [false, false, false, false], "rank": [56, 56, 56, 56]}, {"id": "16PTK023", "name": "rsu_soedarso", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.062333, "lon": 109.366139, "dist_km": 16.8892, "sev": [0.43, 0.4307, 0.4331, 0.4383], "flagged": [false, false, false, false], "rank": [57, 57, 57, 57]}, {"id": "KAL-WKL-0091-H-B", "name": "Binaraya", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": -0.06158, "lon": 109.36595, "dist_km": 16.9754, "sev": [0.43, 0.4306, 0.433, 0.4381], "flagged": [false, false, false, false], "rank": [58, 58, 58, 58]}, {"id": "tbg", "name": "PUNGGUR KECIL \u2013 140280", "desa": "Punggur Kecil", "kec": "Sui Kakap", "lat": -0.09954, "lon": 109.28666, "dist_km": 17.2277, "sev": [0.43, 0.4306, 0.4328, 0.4376], "flagged": [false, false, false, false], "rank": [59, 59, 59, 59]}, {"id": "MPW058", "name": "SEI BEMBAN / ROAD KOTABARU - BEMBAN", "desa": "Punggur Kecil", "kec": "Sungai Kakap", "lat": -0.100056, "lon": 109.286083, "dist_km": 17.2307, "sev": [0.43, 0.4306, 0.4328, 0.4376], "flagged": [false, false, false, false], "rank": [60, 60, 60, 60]}, {"id": "C409", "name": "Punggur Pontianak", "desa": "Punggur Kecil", "kec": "Sui Kakap", "lat": -0.126611, "lon": 109.247694, "dist_km": 18.7744, "sev": [0.43, 0.4303, 0.4317, 0.4352], "flagged": [false, false, false, false], "rank": [61, 61, 61, 61]}, {"id": "MPW030", "name": "PUNGGUR", "desa": "Punggur Kecil", "kec": "Sungai Kakap", "lat": -0.126639, "lon": 109.246806, "dist_km": 18.8582, "sev": [0.43, 0.4303, 0.4317, 0.435], "flagged": [false, false, false, false], "rank": [62, 62, 62, 62]}, {"id": "KAL-WKL-0141-T-B", "name": "Seponti Jaya 2", "desa": "Pal IX", "kec": "Sungai Kakap", "lat": -0.07108, "lon": 109.29848, "dist_km": 18.875, "sev": [0.43, 0.4303, 0.4317, 0.435], "flagged": [false, false, false, false], "rank": [63, 63, 63, 63]}, {"id": "Perdamaian", "name": "KOTABARU PONTIANAK", "desa": "Pal IX", "kec": "Sui Kakap", "lat": -0.066056, "lon": 109.302111, "dist_km": 19.1229, "sev": [0.43, 0.4303, 0.4316, 0.4347], "flagged": [false, false, false, false], "rank": [64, 64, 64, 64]}, {"id": "16MPW020", "name": "punggur_ptk", "desa": "Punggur Kecil", "kec": "Sungai Kakap", "lat": -0.124498, "lon": 109.243279, "dist_km": 19.3169, "sev": [0.43, 0.4302, 0.4315, 0.4345], "flagged": [false, false, false, false], "rank": [65, 65, 65, 65]}, {"id": "MPW026", "name": "SUNGAI_AMBAWANG", "desa": "Sungai Ambawang", "kec": "Sungai Ambawang", "lat": -0.038972, "lon": 109.4135, "dist_km": 19.3386, "sev": [0.43, 0.4302, 0.4315, 0.4345], "flagged": [false, false, false, false], "rank": [66, 66, 66, 66]}, {"id": "tbg", "name": "PERUMNAS 4 PONTIANAK", "desa": "Ambawang Kuala", "kec": "Sui Ambawang", "lat": -0.0369, "lon": 109.38134, "dist_km": 19.4878, "sev": [0.43, 0.4302, 0.4314, 0.4343], "flagged": [false, false, false, false], "rank": [67, 67, 67, 67]}, {"id": "140341", "name": "PARIT AIM AMBAWANG", "desa": "Sungai Ambawang Kuala", "kec": "Sungai Ambawang", "lat": -0.03673, "lon": 109.41427, "dist_km": 19.5962, "sev": [0.43, 0.4302, 0.4314, 0.4342], "flagged": [false, false, false, false], "rank": [68, 68, 68, 68]}, {"id": "16PTK030", "name": "sei_ambawang", "desa": "Ambawang Kuala", "kec": "Sungai Ambawang", "lat": -0.032278, "lon": 109.393278, "dist_km": 19.9548, "sev": [0.43, 0.4302, 0.4312, 0.4338], "flagged": [false, false, false, false], "rank": [69, 69, 69, 69]}, {"id": "RSJ", "name": "RASAU JAYA", "desa": "Rasau Jaya", "kec": "Rasau Jaya", "lat": -0.1952, "lon": 109.2129, "dist_km": 20.1666, "sev": [0.43, 0.4302, 0.4311, 0.4336], "flagged": [false, false, false, false], "rank": [70, 70, 70, 70]}, {"id": "tbg", "name": "TB_JW TENGAH EX SPLIT SUNGAI AMBAWANG-2", "desa": "Jawa Tengah", "kec": "Sui Ambawang", "lat": -0.03507, "lon": 109.44057, "dist_km": 20.3294, "sev": [0.43, 0.4302, 0.4311, 0.4335], "flagged": [false, false, false, false], "rank": [71, 71, 71, 71]}, {"id": "140108", "name": "SUNGAI AMBAWANG", "desa": "Sungai Ambawang Kuala", "kec": "Sungai Ambawang", "lat": -0.02873, "lon": 109.38661, "dist_km": 20.3637, "sev": [0.43, 0.4302, 0.4311, 0.4335], "flagged": [false, false, false, false], "rank": [72, 72, 72, 72]}, {"id": "CD07", "name": "Teluk Nibung", "desa": "Teluk Nibung", "kec": "Batu Ampar", "lat": -0.035778, "lon": 109.452, "dist_km": 20.6183, "sev": [0.43, 0.4301, 0.431, 0.4333], "flagged": [false, false, false, false], "rank": [73, 73, 73, 73]}, {"id": "KAL-WKL-0003-M-B", "name": "Gang Terpadu", "desa": "Jawa Tengah", "kec": "Sungai Ambawang", "lat": -0.03509, "lon": 109.45073, "dist_km": 20.6469, "sev": [0.43, 0.4301, 0.431, 0.4332], "flagged": [false, false, false, false], "rank": [74, 74, 74, 74]}, {"id": "16MPW040", "name": "Kampung Jawa Tengah (rd To Tayan Ambawang 1)", "desa": "Sungai Ambawang", "kec": "Sungai Ambawang", "lat": -0.036008, "lon": 109.463793, "dist_km": 21.045, "sev": [0.43, 0.4301, 0.4309, 0.4329], "flagged": [false, false, false, false], "rank": [75, 75, 75, 75]}, {"id": "MPW060", "name": "DS JAWA TENGAH / SUNGAI AMBAWANG-CAP", "desa": "Jawa Tengah", "kec": "Sungai Ambawang", "lat": -0.0375, "lon": 109.467806, "dist_km": 21.062, "sev": [0.43, 0.4301, 0.4309, 0.4329], "flagged": [false, false, false, false], "rank": [76, 76, 76, 76]}, {"id": "tbg", "name": "TB_KOREK  EX SPLIT DS.JAWA TENGAH-2", "desa": "Korek", "kec": "Sui Ambawang", "lat": -0.04704, "lon": 109.49022, "dist_km": 21.2373, "sev": [0.43, 0.4301, 0.4308, 0.4328], "flagged": [false, false, false, false], "rank": [77, 77, 77, 77]}, {"id": "MPW031", "name": "SUNGAI_ASAM", "desa": "Sungai Asam", "kec": "Sungai Raya", "lat": -0.296972, "lon": 109.567278, "dist_km": 21.5216, "sev": [0.43, 0.4301, 0.4307, 0.4326], "flagged": [false, false, false, false], "rank": [78, 78, 78, 78]}, {"id": "16MPW019", "name": "drm_rasau", "desa": "Sungai Asam", "kec": "Sungai Raya", "lat": -0.296619, "lon": 109.567921, "dist_km": 21.5686, "sev": [0.43, 0.4301, 0.4307, 0.4326], "flagged": [false, false, false, false], "rank": [79, 79, 79, 79]}, {"id": "MPW045", "name": "KOREK / KOREK EX KAMP JAWA T / SUKAMARA 2", "desa": "Korek", "kec": "Sungai Ambawang", "lat": -0.052417, "lon": 109.515861, "dist_km": 22.3368, "sev": [0.43, 0.4301, 0.4306, 0.4321], "flagged": [false, false, false, false], "rank": [80, 80, 80, 80]}, {"id": "140186", "name": "PAL 9", "desa": "Pal IX", "kec": "Sungai Kakap", "lat": -0.06163, "lon": 109.25604, "dist_km": 22.6327, "sev": [0.43, 0.4301, 0.4305, 0.432], "flagged": [false, false, false, false], "rank": [81, 81, 81, 81]}, {"id": "MPW018", "name": "PAL_IX / SEI_KAKAP_2", "desa": "Pal IX", "kec": "Sungai Kakap", "lat": -0.062167, "lon": 109.255444, "dist_km": 22.6336, "sev": [0.43, 0.4301, 0.4305, 0.432], "flagged": [false, false, false, false], "rank": [82, 82, 82, 82]}, {"id": "MPW046", "name": "KALIMAS / PUNGGUR 2", "desa": "Kalimas", "kec": "Sungai Kakap", "lat": -0.09325, "lon": 109.227333, "dist_km": 22.6938, "sev": [0.43, 0.4301, 0.4305, 0.4319], "flagged": [false, false, false, false], "rank": [83, 83, 83, 83]}, {"id": "tbg", "name": "KALIMAS - 140190", "desa": "Kalimas", "kec": "Sui Kakap", "lat": -0.08744, "lon": 109.22507, "dist_km": 23.2768, "sev": [0.43, 0.4301, 0.4304, 0.4317], "flagged": [false, false, false, false], "rank": [84, 84, 84, 84]}, {"id": "16PTK062", "name": "rd_to_kakap", "desa": "Pal IX", "kec": "Sungai Kakap", "lat": -0.066306, "lon": 109.242806, "dist_km": 23.2875, "sev": [0.43, 0.4301, 0.4304, 0.4317], "flagged": [false, false, false, false], "rank": [85, 85, 85, 85]}, {"id": "PTK043", "name": "KUALA MANDOR", "desa": "Kuala Mandor B", "kec": "Kuala Mandor B", "lat": -0.008639, "lon": 109.44925, "dist_km": 23.4184, "sev": [0.43, 0.43, 0.4304, 0.4316], "flagged": [false, false, false, false], "rank": [86, 86, 86, 86]}, {"id": "16MPW041", "name": "desa korek (RD TO Tayan Ambawang 2)", "desa": "Korek", "kec": "Sungai Ambawang", "lat": -0.040101, "lon": 109.540271, "dist_km": 25.1108, "sev": [0.43, 0.43, 0.4302, 0.4311], "flagged": [false, false, false, false], "rank": [87, 87, 87, 87]}, {"id": "140404", "name": "SUNGAI KAKAP", "desa": "Sungai Kakap", "kec": "Sungai Kakap", "lat": -0.05433, "lon": 109.22469, "dist_km": 25.6655, "sev": [0.43, 0.43, 0.4302, 0.4309], "flagged": [false, false, false, false], "rank": [88, 88, 88, 88]}, {"id": "140340", "name": "PRAMUKA", "desa": "Sungai Rengas", "kec": "Sungai Kakap", "lat": -0.00668, "lon": 109.28487, "dist_km": 25.8034, "sev": [0.43, 0.43, 0.4302, 0.4309], "flagged": [false, false, false, false], "rank": [89, 89, 89, 89]}, {"id": "GLN", "name": "GUNUNG LINANG", "desa": "Batu Ampar", "kec": "Batu Ampar", "lat": -0.4445, "lon": 109.38916, "dist_km": 25.8868, "sev": [0.43, 0.43, 0.4302, 0.4309], "flagged": [false, false, false, false], "rank": [90, 90, 90, 90]}, {"id": "140867A", "name": "HARAPAN KITA", "desa": "Sungai Rengas", "kec": "Sungai Kakap", "lat": -0.0031, "lon": 109.28391, "dist_km": 26.2053, "sev": [0.43, 0.43, 0.4302, 0.4308], "flagged": [false, false, false, false], "rank": [91, 91, 91, 91]}, {"id": "3413", "name": "Sungai Kakap", "desa": "Sui Kakap", "kec": "Sui Kakap", "lat": -0.006556, "lon": 109.272, "dist_km": 26.5154, "sev": [0.43, 0.43, 0.4302, 0.4307], "flagged": [false, false, false, false], "rank": [92, 92, 92, 92]}, {"id": "MPW144", "name": "TPI JERUJU EX LANCAK BADAU / TPI JERUJU (PTK076)", "desa": "Sungai Rengas", "kec": "Sungai Kakap", "lat": -0.005306, "lon": 109.270222, "dist_km": 26.736, "sev": [0.43, 0.43, 0.4302, 0.4307], "flagged": [false, false, false, false], "rank": [93, 93, 93, 93]}, {"id": "16PTK053", "name": "nipah kuning", "desa": "Sungai Rengas", "kec": "Sungai Kakap", "lat": -0.004722, "lon": 109.262361, "dist_km": 27.2493, "sev": [0.43, 0.43, 0.4301, 0.4306], "flagged": [false, false, false, false], "rank": [94, 94, 94, 94]}, {"id": "16MPW009", "name": "sungai_kakap", "desa": "Sungai Kakap", "kec": "Sungai Kakap", "lat": -0.056444, "lon": 109.194278, "dist_km": 28.0881, "sev": [0.43, 0.43, 0.4301, 0.4305], "flagged": [false, false, false, false], "rank": [95, 95, 95, 95]}, {"id": "MPW013", "name": "SEI_KAKAP", "desa": "Sungai Kakap", "kec": "Sungai Kakap", "lat": -0.056306, "lon": 109.194222, "dist_km": 28.1024, "sev": [0.43, 0.43, 0.4301, 0.4305], "flagged": [false, false, false, false], "rank": [96, 96, 96, 96]}, {"id": "140185", "name": "SUNGAI RENGAS", "desa": "Sungai Rengas", "kec": "Sungai Kakap", "lat": -0.00906, "lon": 109.23767, "dist_km": 28.4282, "sev": [0.43, 0.43, 0.4301, 0.4305], "flagged": [false, false, false, false], "rank": [97, 97, 97, 97]}, {"id": "MPW047", "name": "SUNGAI RENGAS", "desa": "Sungai Rengas", "kec": "Sungai Kakap", "lat": -0.006556, "lon": 109.238167, "dist_km": 28.6161, "sev": [0.43, 0.43, 0.4301, 0.4304], "flagged": [false, false, false, false], "rank": [98, 98, 98, 98]}, {"id": "MPW067", "name": "SUNGAI SELAMAT", "desa": "Sungai Selamat", "kec": "Kubu", "lat": -0.395056, "lon": 109.211444, "dist_km": 28.729, "sev": [0.43, 0.43, 0.4301, 0.4304], "flagged": [false, false, false, false], "rank": [99, 99, 99, 99]}, {"id": "KAL-WKL-0049-T-B", "name": "BRI Sungai Kakap", "desa": "Sungai Kakap", "kec": "Sungai Kakap", "lat": -0.06084, "lon": 109.18123, "dist_km": 28.9601, "sev": [0.43, 0.43, 0.4301, 0.4304], "flagged": [false, false, false, false], "rank": [100, 100, 100, 100]}, {"id": "PTK042", "name": "TELOK PEKADAI-31", "desa": "Selat Remis", "kec": "Teluk Pakedai", "lat": -0.312583, "lon": 109.15125, "dist_km": 29.1785, "sev": [0.43, 0.43, 0.4301, 0.4304], "flagged": [false, false, false, false], "rank": [101, 101, 101, 101]}, {"id": "16MPW016", "name": "tpi", "desa": "Jeruju Besar", "kec": "Sungai Kakap", "lat": -0.011111, "lon": 109.224083, "dist_km": 29.199, "sev": [0.43, 0.43, 0.4301, 0.4304], "flagged": [false, false, false, false], "rank": [102, 102, 102, 102]}, {"id": "CD05", "name": "CD05", "desa": "Selat Remis", "kec": "Teluk Pakedai", "lat": -0.313972, "lon": 109.151, "dist_km": 29.2638, "sev": [0.43, 0.43, 0.4301, 0.4304], "flagged": [false, false, false, false], "rank": [103, 103, 103, 103]}, {"id": "140381", "name": "TELUK PAKEDAI", "desa": "Selat Remis", "kec": "Teluk Pakedai", "lat": -0.31931, "lon": 109.15189, "dist_km": 29.409, "sev": [0.43, 0.43, 0.4301, 0.4304], "flagged": [false, false, false, false], "rank": [104, 104, 104, 104]}, {"id": "16MPW045", "name": "teluk pakedai", "desa": "Selat Remis", "kec": "Teluk Pakedai", "lat": -0.313111, "lon": 109.148944, "dist_km": 29.4378, "sev": [0.43, 0.43, 0.4301, 0.4304], "flagged": [false, false, false, false], "rank": [105, 105, 105, 105]}, {"id": "140196", "name": "KARYA BERSAMA", "desa": "Kubu", "kec": "Kubu", "lat": -0.48788, "lon": 109.37753, "dist_km": 30.7573, "sev": [0.43, 0.43, 0.43, 0.4303], "flagged": [false, false, false, false], "rank": [106, 106, 106, 106]}, {"id": "MPW052", "name": "PANCAROBA / PANCAROBA EX LINGGA", "desa": "Pancaroba", "kec": "Sungai Ambawang", "lat": -0.031361, "lon": 109.604722, "dist_km": 30.8846, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [107, 107, 107, 107]}, {"id": "16MPW017", "name": "kubu_ptk", "desa": "Kubu", "kec": "Kubu", "lat": -0.490204, "lon": 109.380673, "dist_km": 30.9973, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [108, 108, 108, 108]}, {"id": "MPW021", "name": "KUBU", "desa": "Kubu", "kec": "Kubu", "lat": -0.491889, "lon": 109.377444, "dist_km": 31.2029, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [109, 109, 109, 109]}, {"id": "16MPW025", "name": "pancaroba", "desa": "Pancaroba", "kec": "Sungai Ambawang", "lat": -0.030311, "lon": 109.609984, "dist_km": 31.4067, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [110, 110, 110, 110]}, {"id": "MPW126", "name": "SAJINGAN BESAR / JERUJU BESAR (PTK067)", "desa": "Jeruju Besar", "kec": "Sungai Kakap", "lat": -0.008556, "lon": 109.196111, "dist_km": 31.4993, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [111, 111, 111, 111]}, {"id": "tbg", "name": "SUNGAI KUPAH \u2013 140192", "desa": "Sui Kupah", "kec": "Sui Kakap", "lat": -0.008582, "lon": 109.19601, "dist_km": 31.505, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [112, 112, 112, 112]}, {"id": "MPW071", "name": "TERENTANG", "desa": "Terentang Hilir", "kec": "Terentang", "lat": -0.384167, "lon": 109.626944, "dist_km": 32.2703, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [113, 113, 113, 113]}, {"id": "16MPW023", "name": "terentang", "desa": "Terentang Hilir", "kec": "Terentang", "lat": -0.384221, "lon": 109.627335, "dist_km": 32.3088, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [114, 114, 114, 114]}, {"id": "tbg", "name": "RADAK", "desa": "Terentang Hulu", "kec": "Terentang", "lat": -0.45297, "lon": 109.55861, "dist_km": 32.5047, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [115, 115, 115, 115]}, {"id": "CD06", "name": "Kubu", "desa": "Kubu", "kec": "Kubu", "lat": -0.503694, "lon": 109.371, "dist_km": 32.5607, "sev": [0.43, 0.43, 0.43, 0.4302], "flagged": [false, false, false, false], "rank": [116, 116, 116, 116]}, {"id": "MPW077", "name": "Sule Bagas", "desa": "Korek", "kec": "Sungai Ambawang", "lat": 0.044111, "lon": 109.557889, "dist_km": 33.8147, "sev": [0.43, 0.43, 0.43, 0.4301], "flagged": [false, false, false, false], "rank": [117, 117, 117, 117]}, {"id": "140094", "name": "H095", "desa": "Sungai Raya", "kec": "Sungai Raya", "lat": 0.09829, "lon": 109.36266, "dist_km": 34.6435, "sev": [0.43, 0.43, 0.43, 0.4301], "flagged": [false, false, false, false], "rank": [118, 118, 118, 118]}, {"id": "tbg", "name": "KUBU_PADI", "desa": "Kubu Padi", "kec": "Kuala Mandor B", "lat": 0.09963, "lon": 109.46834, "dist_km": 35.6081, "sev": [0.43, 0.43, 0.43, 0.4301], "flagged": [false, false, false, false], "rank": [119, 119, 119, 119]}, {"id": "MPW072", "name": "PENEMPAT EX TAYAN ROAD", "desa": "Teluk Bakung", "kec": "Sungai Ambawang", "lat": -0.014167, "lon": 109.695278, "dist_km": 40.107, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [120, 120, 120, 120]}, {"id": "16MPW049", "name": "bakung (Penempat)", "desa": "Teluk Bakung", "kec": "Sungai Ambawang", "lat": -0.01584, "lon": 109.696801, "dist_km": 40.1476, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [121, 121, 121, 121]}, {"id": "MPW076", "name": "MTDABUNG", "desa": "Dabung", "kec": "Kubu", "lat": -0.569, "lon": 109.28358, "dist_km": 41.564, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [122, 122, 122, 122]}, {"id": "16MPW044", "name": "dabung", "desa": "Dabung", "kec": "Kubu", "lat": -0.589417, "lon": 109.256083, "dist_km": 44.69, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [123, 123, 123, 123]}, {"id": "tbg", "name": "pulau limbung", "desa": "Pulau Limbung", "kec": "Sui Raya", "lat": -0.26812, "lon": 109.85852, "dist_km": 52.0853, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [124, 124, 124, 124]}, {"id": "MPW022", "name": "PADANG_TIKAR", "desa": "Padang Tikar", "kec": "Batu Ampar", "lat": -0.695139, "lon": 109.264361, "dist_km": 55.6372, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [125, 125, 125, 125]}, {"id": "16MPW027", "name": "padang_tikar", "desa": "Padang Tikar II", "kec": "Batu Ampar", "lat": -0.696528, "lon": 109.263278, "dist_km": 55.8176, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [126, 126, 126, 126]}, {"id": "16MPW026", "name": "teluk_air", "desa": "Batu Ampar", "kec": "Batu Ampar", "lat": -0.729861, "lon": 109.565889, "dist_km": 60.7178, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [127, 127, 127, 127]}, {"id": "MPW036", "name": "BATU_AMPAR", "desa": "Sungai Limau", "kec": "Batu Ampar", "lat": -0.739778, "lon": 109.533111, "dist_km": 60.733, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [127, 128, 128, 128]}, {"id": "16KTP009", "name": "batu_ampar_ptk", "desa": "Batu Ampar", "kec": "Batu Ampar", "lat": -0.743417, "lon": 109.537139, "dist_km": 61.2395, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [129, 129, 129, 129]}, {"id": "MPW062", "name": "MASTURA BATU AMPAR", "desa": "Teluk Mastura", "kec": "Batu Ampar", "lat": -0.751611, "lon": 109.542361, "dist_km": 62.2714, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [130, 130, 130, 130]}, {"id": "MPW029", "name": "TELUK_NIBUNG", "desa": "Teluk Nibung", "kec": "Batu Ampar", "lat": -0.792639, "lon": 109.468667, "dist_km": 65.132, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [131, 131, 131, 131]}, {"id": "P06-07", "name": "SUNGAI BESAR", "desa": "Sungai Besar", "kec": "Batu Ampar", "lat": -0.79, "lon": 109.253889, "dist_km": 66.1477, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [132, 132, 132, 132]}, {"id": "MPW149", "name": "DESA SETIA BARU", "desa": "Teluk Nibung", "kec": "Batu Ampar", "lat": -0.81525, "lon": 109.49311, "dist_km": 68.0156, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [132, 133, 133, 133]}, {"id": "MPW078", "name": "MTMEGATIMUR", "desa": "Mega Timur", "kec": "Sui Ambawang", "lat": -0.1105, "lon": 110.074889, "dist_km": 76.5976, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [132, 134, 134, 134]}, {"id": "P06-22", "name": "BATU AMPAR", "desa": "Batu Ampar", "kec": "Batu Ampar", "lat": -0.859722, "lon": 109.690278, "dist_km": 79.2495, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [132, 135, 135, 135]}, {"id": "P06-23", "name": "SUMBER AGUNG", "desa": "Sumber Agung", "kec": "Batu Ampar", "lat": -0.80556, "lon": 109.79445, "dist_km": 79.671, "sev": [0.43, 0.43, 0.43, 0.43], "flagged": [false, false, false, false], "rank": [132, 136, 136, 136]}], "detector": {"confusion_matrix": {"tn": 2021, "fp": 1116, "fn": 642, "tp": 10298}, "held_out": {"clean_support": 3137, "attack_support": 10940, "clean_precision": 0.759, "clean_recall": 0.644, "clean_f1": 0.697, "attack_precision": 0.902, "attack_recall": 0.941, "attack_f1": 0.921, "accuracy": 0.875}, "roc_auc": 0.916, "pr_auc": 0.968, "feature_importances": [{"feature": "agc_cnt_mean", "importance": 0.134068}, {"feature": "snr_l1_mean", "importance": 0.123277}, {"feature": "noise_per_ms_mean", "importance": 0.091191}, {"feature": "jam_ind_mean", "importance": 0.071361}, {"feature": "snr_l1_std", "importance": 0.051909}, {"feature": "velN", "importance": 0.050726}, {"feature": "n_sats_l1", "importance": 0.047399}, {"feature": "gSpeed", "importance": 0.047095}, {"feature": "hAcc", "importance": 0.044299}, {"feature": "vAcc", "importance": 0.037484}, {"feature": "pr_doppler_residual_std", "importance": 0.036591}, {"feature": "doppler_l1_std", "importance": 0.035316}, {"feature": "sAcc", "importance": 0.032335}, {"feature": "pDOP", "importance": 0.03083}, {"feature": "doppler_l1_mean", "importance": 0.028635}, {"feature": "headAcc", "importance": 0.028626}, {"feature": "pos_dev_m", "importance": 0.027056}, {"feature": "snr_l1_min", "importance": 0.026654}, {"feature": "numSV", "importance": 0.018183}, {"feature": "velE", "importance": 0.015381}, {"feature": "pr_doppler_residual_mean", "importance": 0.013402}, {"feature": "velD", "importance": 0.007591}, {"feature": "fixType", "importance": 0.000591}], "per_attack_recall": [{"attack_type": "Jamming", "n_rows": 3498.0, "recall": 0.870783}, {"attack_type": "Meaconing", "n_rows": 1920.0, "recall": 0.965104}, {"attack_type": "Spoofing", "n_rows": 3120.0, "recall": 0.972436}, {"attack_type": "Spoofing + Jamming", "n_rows": 2402.0, "recall": 0.984596}]}};
+
+// ---------- Spatial map ----------
+const towers = DATA.towers;
+const meta = DATA.meta;
+const lats = towers.map(t => t.lat);
+const lons = towers.map(t => t.lon);
+const meanLatRad = (lats.reduce((a,b)=>a+b,0)/lats.length) * Math.PI/180;
+
+const epicenter = towers.find(t => t.id === meta.epicenter_site_id);
+
+function severityColorScale(){
+  return [[0,'#FFF3C4'],[0.35,'#FFD27A'],[0.65,'#FF8A3D'],[1,'#B3221A']];
+}
+
+function buildTraces(t){
+  const sev = towers.map(tw => tw.sev[t]);
+  const sizes = sev.map(s => 7 + 24*Math.max(0, Math.min(1,(s-meta.floor)/(meta.ceiling-meta.floor))));
+  const hover = towers.map((tw,i) => (
+    `<b>${tw.id}</b> — ${tw.name}<br>` +
+    `${tw.desa}, ${tw.kec}<br>` +
+    `SIMULATED severity (t=${t}): <b>${sev[i].toFixed(3)}</b><br>` +
+    `(anchored to REAL detector proba range: floor ${meta.floor.toFixed(3)} / ceiling ${meta.ceiling.toFixed(3)})<br>` +
+    `Distance from SIMULATED epicenter: ${tw.dist_km.toFixed(2)} km<br>` +
+    `SIMULATED priority rank: #${tw.rank[t]}` +
+    (tw.flagged[t] ? '<br><b style="color:#FF8A3D">FLAGGED (SIMULATED)</b>' : '')
+  ));
+
+  const towerTrace = {
+    type:'scattergl', mode:'markers',
+    x: lons, y: lats,
+    marker:{
+      color: sev, colorscale: severityColorScale(), cmin: meta.floor, cmax: meta.ceiling,
+      size: sizes, line:{color:'#0A121C', width:1},
+      colorbar:{title:{text:'SIMULATED severity', font:{color:'#EAF1F7', size:11}},
+                tickfont:{color:'#94A7BA', size:10}, outlinewidth:0, len:0.85}
+    },
+    text: hover, hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#263647', font:{color:'#EAF1F7', size:12}},
+    showlegend:false,
+  };
+
+  const epicenterTrace = {
+    type:'scattergl', mode:'markers',
+    x:[epicenter.lon], y:[epicenter.lat],
+    marker:{symbol:'star', size:22, color:'rgba(0,0,0,0)', line:{color:'#4da3ff', width:2.5}},
+    text:[`SIMULATED epicenter<br><b>${epicenter.id}</b> — ${epicenter.name}`],
+    hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#4da3ff', font:{color:'#EAF1F7', size:12}},
+    showlegend:false,
+  };
+
+  const top5 = towers.filter(tw => tw.rank[t] <= 5).sort((a,b)=>a.rank[t]-b.rank[t]);
+  const labelTrace = {
+    type:'scattergl', mode:'text',
+    x: top5.map(t2=>t2.lon), y: top5.map(t2=>t2.lat),
+    text: top5.map(t2 => `#${t2.rank[t]} ${t2.id}`),
+    textposition:'top center', textfont:{color:'#EAF1F7', size:10, family:'Calibri'},
+    hoverinfo:'skip', showlegend:false,
+  };
+
+  return [towerTrace, epicenterTrace, labelTrace];
+}
+
+const layout = {
+  paper_bgcolor:'#0A121C', plot_bgcolor:'#0A121C',
+  font:{color:'#EAF1F7'},
+  margin:{l:50,r:20,t:10,b:40},
+  xaxis:{title:'Longitude', gridcolor:'#1c2a3a', zerolinecolor:'#1c2a3a', color:'#94A7BA'},
+  yaxis:{title:'Latitude', gridcolor:'#1c2a3a', zerolinecolor:'#1c2a3a', color:'#94A7BA',
+         scaleanchor:'x', scaleratio: 1/Math.cos(meanLatRad)},
+  hovermode:'closest',
+};
+
+Plotly.newPlot('map', buildTraces(0), layout, {displayModeBar:true, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
+
+function renderTimestep(t){
+  Plotly.react('map', buildTraces(t), layout, {displayModeBar:true, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
+  document.getElementById('flagcount').textContent = meta.flagged_counts[t];
+  document.getElementById('tslider').value = t;
+  document.querySelectorAll('.tstep-btns button').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.t) === t);
+  });
+}
+
+const tbtns = document.getElementById('tbtns');
+for(let t=0; t<meta.n_snapshots; t++){
+  const b = document.createElement('button');
+  b.textContent = 't=' + t;
+  b.dataset.t = t;
+  b.onclick = () => renderTimestep(t);
+  tbtns.appendChild(b);
+}
+document.getElementById('tslider').addEventListener('input', e => renderTimestep(Number(e.target.value)));
+renderTimestep(0);
+
+// ---------- Detector evidence ----------
+const det = DATA.detector;
+const ho = det.held_out;
+
+document.getElementById('headline-stats').innerHTML = `
+  <div class="stat"><div class="v">${(ho.accuracy*100).toFixed(1)}%</div><div class="l">Accuracy</div></div>
+  <div class="stat"><div class="v">${det.roc_auc.toFixed(3)}</div><div class="l">ROC-AUC</div></div>
+  <div class="stat"><div class="v">${det.pr_auc.toFixed(3)}</div><div class="l">PR-AUC</div></div>
+  <div class="stat"><div class="v">${(ho.attack_recall*100).toFixed(1)}%</div><div class="l">Attack recall</div></div>
+  <div class="stat"><div class="v">${(ho.attack_precision*100).toFixed(1)}%</div><div class="l">Attack precision</div></div>
+  <div class="stat"><div class="v">${ho.clean_support + ho.attack_support}</div><div class="l">Held-out rows</div></div>
+`;
+
+const cm = det.confusion_matrix;
+document.getElementById('cm-table').innerHTML = `
+  <tr><th></th><th>Pred: clean</th><th>Pred: attack</th></tr>
+  <tr><th>True: clean</th><td class="diag">${cm.tn}</td><td class="offdiag">${cm.fp}</td></tr>
+  <tr><th>True: attack</th><td class="offdiag">${cm.fn}</td><td class="diag">${cm.tp}</td></tr>
+`;
+
+let attackRows = det.per_attack_recall.map(r =>
+  `<tr><td>${r.attack_type}</td><td>${Math.round(r.n_rows)}</td><td>${(r.recall*100).toFixed(1)}%</td></tr>`
+).join('');
+document.getElementById('attack-table').innerHTML =
+  `<tr><th>Attack type</th><th>n rows</th><th>Recall</th></tr>` + attackRows;
+
+const fi = det.feature_importances.slice(0, 12).slice().reverse();
+Plotly.newPlot('fi-chart', [{
+  type:'bar', orientation:'h',
+  x: fi.map(f=>f.importance), y: fi.map(f=>f.feature),
+  marker:{color:'#3fb8af'},
+  hovertemplate:'%{y}: %{x:.4f}<extra></extra>',
+}], {
+  paper_bgcolor:'#0A121C', plot_bgcolor:'#0A121C', font:{color:'#EAF1F7', size:11.5},
+  margin:{l:150,r:20,t:6,b:36},
+  xaxis:{title:'Importance', gridcolor:'#1c2a3a', color:'#94A7BA'},
+  yaxis:{color:'#EAF1F7'},
+}, {displayModeBar:false, responsive:true});
+</script>
+</body>
+</html>

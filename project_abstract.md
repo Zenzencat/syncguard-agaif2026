@@ -32,7 +32,11 @@ assurance), and — downstream — the public and services (emergency communicat
 transactions, general connectivity) that depend on uninterrupted network timing.
 **Spatial context**: base stations are fixed, geographically distributed assets; a spoofing
 attack is local to a receiver's radio range, so detection has to run per-site rather than
-as a single centralized check.
+as a single centralized check — and neighbouring sites in the same area are plausibly
+affected together, which is exactly what a per-site-only detector cannot show on its own.
+§3 and §4 below describe the spatial layer added to make that visible: real ASEAN tower
+locations, with a clearly-labeled *simulated* spoofing-spread overlay used to demonstrate
+where, how correlated, and which sites to prioritize (§5 shows the resulting map).
 
 ## 2. Proposed Solution
 *(PDGS Canvas C5 — GeoAI Intelligence; C6 — GeoAI Solution Design)*
@@ -82,6 +86,39 @@ public dataset of real telecom base-station GNSS timing under spoofing currently
 is a genuine limitation of the evidence base available for this hackathon timeline, and is
 carried forward explicitly into the roadmap below rather than left implicit.
 
+### Spatial layer data — real infrastructure, SIMULATED spread (read this split carefully)
+
+To address the gap named above — the Jammertest 2024 detector has no spatial component, so it
+cannot show *where* anomalies occur, whether *neighbouring sites* are correlated, or *which
+sites to prioritize* — a second, clearly-separated data source and simulation layer was added.
+**The line between what is real and what is simulated is stated explicitly here and is not
+softened anywhere else this appears (plots, notebooks, or this document):**
+
+- **REAL**: 136 real PT. Telkomsel cellular base-station sites (`site_id`, `site_name`,
+  village/district, lat/long, tower type and construction metadata) in Kubu Raya and
+  Pontianak, West Kalimantan, Indonesia — `menaratelepon_ar_50k.csv`, sourced from the AGAIF
+  bootcamp's own Module 6 (AD1002) materials. Verified clean: no missing coordinates, no
+  duplicate coordinates, one coherent region.
+- **REAL**: the severity *scale* used on the map is anchored to the Jammertest-2024 detector's
+  own, actual `predict_proba()` output — not invented numbers. Re-running the validated
+  Pipeline from §4/§5 in-memory and self-checking it against the published classification
+  report reproduces median predicted probability = **0.953** on true attack rows (n=10,940)
+  and **0.430** on true clean rows (n=3,137); these become the severity ceiling/floor.
+- **SIMULATED**: everything about *where* an attack originates and *how* it spreads. No
+  public dataset of real ASEAN base-station GNSS timing under spoofing exists (same gap
+  as above), so there is no measured spread to show. Instead, one real tower site (the one
+  nearest the cluster's geometric centroid, chosen deterministically rather than hand-picked)
+  is designated a simulated epicenter, and a documented distance-decay function —
+  `severity = floor + (ceiling - floor) · exp(-distance_km / decay_km)`, calibrated so the
+  flagged-anomalous footprint grows from 3 to 21 of the 136 real sites across four
+  illustrative time steps — spreads simulated severity to real neighbouring sites. This is a
+  simplifying assumption standing in for "nearby infrastructure sharing correlated GNSS
+  timing anomalies," not a measured or validated propagation model.
+
+Full methodology and every parameter choice: `agaif-materials/dataset/spatial_layer_notes.md`.
+Every column, filename, and plot title this layer produces carries an explicit `SIMULATED`
+marker so the distinction cannot be lost by truncation, copy-paste, or a later rename.
+
 ## 4. Methodology
 *(PDGS Canvas C6 — GeoAI Solution Design; C7 — Technology Stack)*
 
@@ -113,6 +150,20 @@ represented in both splits, and the model is genuinely tested on recordings it n
 during training. Scenario metadata (attack type, receiver state, frequency band, timestamps)
 was excluded from the feature matrix itself — a deployed detector would not have this as
 ground truth, only the signal measurements.
+
+**Spatial simulation methodology** (see §3 for the real/SIMULATED data split this builds on):
+the detector above is not retrained or modified for this step — its held-out-set
+`predict_proba()` distribution is reused as-is to set a real severity floor (0.430, median
+clean-row probability) and ceiling (0.993, 90th-percentile attack-row probability). A single
+real tower site nearest the 136-site cluster's centroid is designated the SIMULATED epicenter,
+haversine distance from it to every other real site is computed, and SIMULATED severity is
+assigned by exponential distance decay (`decay_km = 2.0`, chosen — not measured — so the
+flagged set grows from 3 sites at the first illustrative time step to 21 at the last, a
+localized footprint rather than the near-uniform 116/136 an earlier, looser decay constant
+produced). Sites are ranked by SIMULATED severity to produce a priority list. This whole step
+is implemented in `agaif-materials/dataset/build_spatial_simulation.py`, runs headless with no
+network calls, and writes `simulated_spatial_anomaly_SIMULATED.csv` plus the map/spread-over-
+time plots referenced in §5.
 
 ## 5. Results
 
@@ -148,6 +199,22 @@ Meaconing 96.5%, Jamming 87.1% (weakest of the four).
 signatures in real GNSS-receiver observables at a controlled test range. They do not yet
 demonstrate performance on production base-station telemetry (see Data Sources framing gap
 above) — that validation is future work, not a claim of this submission.
+
+**Spatial evidence — where, neighbouring, and prioritize** (methodology in §4, real/SIMULATED
+data split in §3): applying the spatial layer to the 136 real Kubu Raya/Pontianak tower sites
+produces `agaif-materials/dataset/spatial_processed/spatial_anomaly_map_SIMULATED.png` (real
+site locations, SIMULATED severity and epicenter, top-5 priority sites labeled) and
+`spatial_anomaly_spread_over_time_SIMULATED.png` (SIMULATED flagged-site count widening 3 → 6
+→ 12 → 21 across four illustrative steps). This is the answer to the three gaps named in §1:
+*where* — the map plots SIMULATED severity directly onto real coordinates; *neighbouring* —
+sites near the SIMULATED epicenter show correlated SIMULATED severity, falling off with real
+distance; *prioritize* — `simulated_spatial_anomaly_SIMULATED.csv` ranks all 136 real sites by
+SIMULATED severity. **Scope of claim, stated with the same directness as above**: the tower
+locations are real and the severity scale is anchored to the real detector's own confidence
+range, but the spread pattern itself is a documented simulation, not a measurement — no public
+dataset of real ASEAN base-station GNSS timing under spoofing exists to measure it from. This
+is illustrative evidence of what the detector's output *could* look like laid over a real
+network, not a demonstrated regional spoofing event.
 
 ### Ethics, Privacy & Sustainability
 *(PDGS Canvas C8)*
@@ -205,8 +272,11 @@ Claude (Anthropic) was used throughout this project's dataset and modeling work:
 and evaluating candidate GNSS datasets (including identifying that the originally planned
 FGI-JSDR/FGI-GSRx pipeline required MATLAB, which was unavailable, and locating the Jammertest
 2024 Zenodo dataset used instead), writing the Python feature-extraction and model-training
-code, and drafting this abstract from the team's results and decisions. All code was executed
-and all outputs — the extracted features, the trained model's metrics, and the claims made in
-this document — were reviewed and validated by the team before inclusion. No part of the
+code, building the spatial layer described in §3–§5 (selecting the real tower dataset, writing
+`build_spatial_simulation.py`, and choosing/documenting the SIMULATED epicenter and
+distance-decay methodology), and drafting this abstract from the team's results and decisions.
+All code was executed and all outputs — the extracted features, the trained model's metrics,
+the spatial-layer outputs, and the claims made in this document — were reviewed and validated
+by the team before inclusion, including the real/SIMULATED framing itself. No part of the
 dataset, results, or this document was generated without human review. This disclosure is
 provided in full per the AI Usage Declaration requirement.
