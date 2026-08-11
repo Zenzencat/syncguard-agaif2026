@@ -1,6 +1,6 @@
 # SyncGuard
 
-*AGAIF 2026 Hackathon — Cybersecurity Track — Team Lorem Ipsum (HACK_TH_001, Thailand)*
+*AGAIF 2026 Hackathon — Cybersecurity Track — Team Lorem Ipsum (HACK_TH_014, Thailand)*
 
 SyncGuard is a lightweight, per-site anomaly-detection layer that monitors a base station's
 GNSS receiver observables — signal quality, Doppler behaviour, RF interference indicators, and

@@ -1,6 +1,6 @@
 # SyncGuard — Project Abstract
 
-**Team Lorem Ipsum (HACK_TH_001, Thailand) — AGAIF 2026 Hackathon, Cybersecurity (CY) Track**
+**Team Lorem Ipsum (HACK_TH_014, Thailand) — AGAIF 2026 Hackathon, Cybersecurity (CY) Track**
 
 *This abstract covers all 10 PDGS Canvas dimensions: C1–C3 (§1), C4 (§3), C5–C7 (§2, §4), C8
 (§5), C9–C10 (§6).*
