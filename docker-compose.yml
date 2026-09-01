@@ -1,0 +1,19 @@
+# One command for a judge to run the whole thing:
+#   docker compose up --build
+# Then open http://localhost:8000/dashboard
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - syncguard-data:/app/data   # persists the SQLite scored_events DB across restarts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  syncguard-data:

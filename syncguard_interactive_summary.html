@@ -82,6 +82,34 @@
   .stat .l{font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em;}
   footer{padding:18px clamp(16px,4vw,48px) 40px; color:var(--muted); font-size:12.5px; border-top:1px solid var(--panel-border);}
   #fi-chart, #cm-chart{width:100%; height:380px;}
+
+  /* ---- Live replay section ---- */
+  .badge.live{background:#0f1f2a; border:1px solid #1f5f8f; color:#4da3ff;}
+  .zone-tag.live{background:#0f1f2a; color:#4da3ff; border:1px solid #1f5f8f;}
+  section.card.live-zone{border-color:#1f5f8f;}
+  .api-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;}
+  .api-row input[type=text]{
+    background:#0d1622; border:1px solid var(--panel-border); color:var(--text);
+    border-radius:6px; padding:7px 10px; font-size:13px; min-width:220px;
+  }
+  .pill{display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border-radius:20px; font-size:12.5px; font-weight:700;}
+  .pill .dot{width:8px; height:8px; border-radius:50%; background:currentColor;}
+  .pill.ok{background:#0f2a29; color:var(--real); border:1px solid var(--real-border);}
+  .pill.bad{background:#2a1414; color:#ff6b6b; border:1px solid #7a2323;}
+  .pill.pending{background:#221c0f; color:#e6c34d; border:1px solid #6b5a1f;}
+  .btn{
+    background:#182636; color:var(--text); border:1px solid var(--panel-border); border-radius:6px;
+    padding:8px 16px; cursor:pointer; font-size:13px; font-weight:700;
+  }
+  .btn.primary{background:#12324a; border-color:#1f5f8f; color:#4da3ff;}
+  .btn.stop{background:#2a1414; border-color:#7a2323; color:#ff8080;}
+  .btn:disabled{opacity:.45; cursor:not-allowed;}
+  select.ctl{background:#0d1622; border:1px solid var(--panel-border); color:var(--text); border-radius:6px; padding:7px 10px; font-size:13px;}
+  #live-log{max-height:230px; overflow-y:auto; font-size:12.5px; font-family:Consolas,monospace;}
+  #live-log .row{display:grid; grid-template-columns:80px 90px 1fr 70px 90px; gap:10px; padding:5px 4px; border-bottom:1px solid var(--panel-border);}
+  #live-log .row.attack{color:#ff8080;}
+  #live-log .row.clean{color:var(--real);}
+  #live-log .head{color:var(--muted); font-weight:700; text-transform:uppercase; font-size:10.5px;}
 </style>
 </head>
 <body>
@@ -91,15 +119,58 @@
   <p class="sub">Interactive companion to the pitch deck. GNSS spoofing/jamming/meaconing detection for 4G/5G base-station timing infrastructure, evaluated on the real Jammertest 2024 (Zenodo) dataset, mapped onto real ASEAN telecom tower locations.</p>
   <div class="legend">
     <div class="badge real"><span class="dot"></span>REAL — Jammertest 2024 GNSS recordings, 136 Telkomsel tower sites (Kubu Raya / Pontianak, Indonesia), RandomForest detector evidence</div>
-    <div class="badge sim"><span class="dot"></span>SIMULATED — spoofing epicenter, distance-decay severity, spread over time, priority ranking</div>
+    <div class="badge sim"><span class="dot"></span>SIMULATED — offline map: spoofing epicenter, distance-decay severity, spread over time, priority ranking</div>
+    <div class="badge live"><span class="dot"></span>LIVE — replay feed: real detector scoring per event, real distance-weighted correlation; only the tower each event is attributed to is SIMULATED (round-robin, no per-tower dataset exists)</div>
   </div>
 </header>
 
 <main>
 
+  <section class="card live-zone" id="live-section">
+    <span class="zone-tag live">Live — requires the SyncGuard API running (api/main.py)</span>
+    <h2>Live replay feed</h2>
+    <p class="note">Streams <code>syncguard_features.parquet</code> row-by-row through the real, trained detector via the FastAPI service's asyncio replay loop. Each event's <strong>probability and severity are real model output</strong>, scored live, not pre-computed. Each event's <strong>tower attribution is SIMULATED</strong> (deterministic round-robin over the 136 real sites — the underlying dataset is a single receiver, so there's no real per-tower mapping to use); the <strong>correlation score is a real distance-weighted aggregate</strong> of other real towers' actual recent severities in this session, computed fresh each time — see <code>api/spatial.py</code>.</p>
+
+    <div class="api-row">
+      <label for="api-base" style="font-size:13px;color:var(--muted);font-weight:600;">API base</label>
+      <input type="text" id="api-base" value="">
+      <button class="btn" id="btn-connect">Connect</button>
+      <span class="pill pending" id="api-status"><span class="dot"></span><span id="api-status-text">not connected</span></span>
+    </div>
+
+    <div class="controls">
+      <label for="run-select">Scenario</label>
+      <select class="ctl" id="run-select"><option value="">(default: 2.1.1 Spoofing)</option></select>
+      <label for="speed-select">Speed</label>
+      <select class="ctl" id="speed-select">
+        <option value="5">5x</option>
+        <option value="10" selected>10x</option>
+        <option value="25">25x</option>
+        <option value="50">50x</option>
+      </select>
+      <button class="btn primary" id="btn-start" disabled>Start replay</button>
+      <button class="btn stop" id="btn-stop" disabled>Stop</button>
+      <div class="counter"><span id="replay-count">0</span> events scored this session</div>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <h3>Live tower map (color = live severity, most recent event per tower)</h3>
+        <div id="live-map" style="width:100%;height:420px;"></div>
+      </div>
+      <div>
+        <h3>Live event log (most recent first)</h3>
+        <div id="live-log">
+          <div class="row head"><div>Time</div><div>Attack type</div><div>Tower</div><div>Severity</div><div>Correlation</div></div>
+        </div>
+      </div>
+    </div>
+    <p class="note">If "not connected": start the API from the repo root (<code>make train &amp;&amp; make serve</code>, or <code>docker compose up --build</code>) and click Connect. This section is the only part of the page that talks to a server — everything below is still fully static/offline.</p>
+  </section>
+
   <section class="card sim-zone" id="map-section">
-    <span class="zone-tag sim">Simulated spatial layer, on real tower coordinates</span>
-    <h2>Spatial anomaly severity map</h2>
+    <span class="zone-tag sim">Offline snapshot — simulated spatial layer, on real tower coordinates</span>
+    <h2>Spatial anomaly severity map (static snapshot, from build_spatial_simulation.py)</h2>
     <p class="note">Marker <strong>positions</strong> are the 136 real Telkomsel base-station coordinates. Marker <strong>color/size (severity), the blue epicenter star, and the spread over time</strong> are a documented simulation — no public dataset of real ASEAN base-station GNSS timing under spoofing exists, so this distance-decay spread stands in for "nearby infrastructure sharing correlated timing anomalies." Severity is anchored to the real detector's own <code>predict_proba()</code> range: floor 0.430 (median proba on real held-out clean rows) to ceiling 0.993 (90th-percentile proba on real held-out attack rows) — not invented numbers.</p>
 
     <div class="controls">
@@ -137,7 +208,7 @@
 </main>
 
 <footer>
-  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · Data sourced verbatim from <code>baseline_model_report.md</code>, <code>simulated_spatial_anomaly_SIMULATED.csv</code>, and <code>spatial_layer_notes.md</code> — no live model calls, no external data fetches. Self-contained, works offline.
+  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · The detector-evidence and offline-map sections below are data sourced verbatim from <code>baseline_model_report.md</code>, <code>simulated_spatial_anomaly_SIMULATED.csv</code>, and <code>spatial_layer_notes.md</code> — no live calls, work fully offline. The live-replay section above is the exception: it calls the SyncGuard API (<code>api/main.py</code>) when available and degrades to "not connected" otherwise; it never blocks the rest of the page.
 </footer>
 
 <script>
@@ -273,6 +344,137 @@ Plotly.newPlot('fi-chart', [{
   xaxis:{title:'Importance', gridcolor:'#1c2a3a', color:'#94A7BA'},
   yaxis:{color:'#EAF1F7'},
 }, {displayModeBar:false, responsive:true});
+</script>
+
+<script>
+// ---------- Live replay section (talks to api/main.py; degrades gracefully offline) ----------
+(function(){
+  const $ = (id) => document.getElementById(id);
+  const defaultBase = window.location.protocol.startsWith('http') ? '' : 'http://localhost:8000';
+  const apiBaseInput = $('api-base');
+  apiBaseInput.value = localStorage.getItem('syncguard_api_base') ?? defaultBase;
+
+  const statusPill = $('api-status'), statusText = $('api-status-text');
+  const btnConnect = $('btn-connect'), btnStart = $('btn-start'), btnStop = $('btn-stop');
+  const runSelect = $('run-select'), speedSelect = $('speed-select');
+  const logEl = $('live-log'), countEl = $('replay-count');
+
+  let eventSource = null;
+  let sessionCount = 0;
+  const liveSeverity = new Map(); // site_id -> {lat, lon, name, severity, correlation}
+  let allTowers = [];
+
+  function base(){ return apiBaseInput.value.replace(/\/$/, ''); }
+  function setStatus(kind, text){
+    statusPill.className = 'pill ' + kind;
+    statusText.textContent = text;
+  }
+
+  function renderLiveMap(){
+    const base = allTowers.length ? {
+      type:'scattergl', mode:'markers', x: allTowers.map(t=>t.long ?? t.lon), y: allTowers.map(t=>t.lat),
+      marker:{color:'#26384a', size:6, line:{color:'#0A121C', width:0.5}},
+      hoverinfo:'skip', showlegend:false,
+    } : null;
+    const active = [...liveSeverity.values()];
+    const activeTrace = {
+      type:'scattergl', mode:'markers', x: active.map(t=>t.lon), y: active.map(t=>t.lat),
+      marker:{
+        color: active.map(t=>t.severity), colorscale: severityColorScale(), cmin:0, cmax:1,
+        size: active.map(t=>10+22*t.severity), line:{color:'#0A121C', width:1},
+        colorbar:{title:{text:'Live severity', font:{color:'#EAF1F7', size:11}}, tickfont:{color:'#94A7BA', size:10}, outlinewidth:0, len:0.85},
+      },
+      text: active.map(t => `<b>${t.site_id}</b> — ${t.name}<br>Live severity: <b>${t.severity.toFixed(3)}</b><br>Correlation (real, distance-weighted): ${t.correlation.toFixed(3)}<br><i>Tower attribution SIMULATED (round-robin)</i>`),
+      hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#1f5f8f', font:{color:'#EAF1F7', size:12}},
+      showlegend:false,
+    };
+    const traces = base ? [base, activeTrace] : [activeTrace];
+    const liveLayout = {
+      paper_bgcolor:'#0A121C', plot_bgcolor:'#0A121C', font:{color:'#EAF1F7'},
+      margin:{l:50,r:20,t:10,b:40},
+      xaxis:{title:'Longitude', gridcolor:'#1c2a3a', zerolinecolor:'#1c2a3a', color:'#94A7BA'},
+      yaxis:{title:'Latitude', gridcolor:'#1c2a3a', zerolinecolor:'#1c2a3a', color:'#94A7BA', scaleanchor:'x', scaleratio: 1/Math.cos(meanLatRad)},
+      hovermode:'closest',
+    };
+    Plotly.react('live-map', traces, liveLayout, {displayModeBar:false, responsive:true});
+  }
+
+  function logEvent(ev){
+    const row = document.createElement('div');
+    row.className = 'row ' + (ev.predicted_label === 'attack' ? 'attack' : 'clean');
+    const t = new Date(ev.created_at).toLocaleTimeString();
+    row.innerHTML = `<div>${t}</div><div>${ev.attack_type ?? '—'}</div><div>${ev.tower?.site_id ?? '—'}</div>` +
+                     `<div>${ev.severity.toFixed(3)}</div><div>${ev.correlation_score.toFixed(3)}</div>`;
+    logEl.insertBefore(row, logEl.children[1] || null);
+    while (logEl.children.length > 60) logEl.removeChild(logEl.lastChild);
+  }
+
+  async function connect(){
+    localStorage.setItem('syncguard_api_base', apiBaseInput.value);
+    setStatus('pending', 'connecting…');
+    try{
+      const health = await fetch(base() + '/health').then(r => r.json());
+      if(!health.model_loaded){
+        setStatus('bad', 'API up, but no model loaded (run `make train`)');
+        btnStart.disabled = true;
+        return;
+      }
+      setStatus('ok', `connected · ${health.model_version} · ${health.towers_loaded} towers`);
+      btnStart.disabled = false;
+
+      allTowers = await fetch(base() + '/towers').then(r => r.json());
+      const runs = await fetch(base() + '/replay/runs').then(r => r.json());
+      runSelect.innerHTML = '<option value="">(default: 2.1.1 Spoofing)</option>' + runs.map(r =>
+        `<option value="${r.run_id}">${r.attack_type} ${r.scenario_id} (${r.rover_state}, ${r.n_rows} rows)</option>`
+      ).join('');
+
+      const mapState = await fetch(base() + '/events/map').then(r => r.json());
+      mapState.forEach(e => liveSeverity.set(e.tower_site_id, {
+        site_id: e.tower_site_id, name: e.tower_site_name, lat: e.tower_lat, lon: e.tower_lon,
+        severity: e.severity, correlation: e.correlation_score ?? 0,
+      }));
+      renderLiveMap();
+      openStream();
+    }catch(err){
+      setStatus('bad', 'not connected (' + err.message + ')');
+      btnStart.disabled = true;
+    }
+  }
+
+  function openStream(){
+    if(eventSource) eventSource.close();
+    eventSource = new EventSource(base() + '/stream/events');
+    eventSource.onmessage = (msg) => {
+      const ev = JSON.parse(msg.data);
+      if(!ev.tower) return;
+      liveSeverity.set(ev.tower.site_id, {
+        site_id: ev.tower.site_id, name: ev.tower.site_name, lat: ev.tower.lat, lon: ev.tower.lon,
+        severity: ev.severity, correlation: ev.correlation_score ?? 0,
+      });
+      renderLiveMap();
+      logEvent(ev);
+      sessionCount += 1;
+      countEl.textContent = sessionCount;
+    };
+    eventSource.onerror = () => setStatus('bad', 'stream disconnected — click Connect to retry');
+  }
+
+  btnConnect.addEventListener('click', connect);
+  btnStart.addEventListener('click', async () => {
+    const params = new URLSearchParams({speed: speedSelect.value});
+    if(runSelect.value) params.set('run_id', runSelect.value);
+    const res = await fetch(`${base()}/replay/start?${params}`, {method:'POST'});
+    if(res.ok){ btnStart.disabled = true; btnStop.disabled = false; }
+    else { const err = await res.json().catch(()=>({detail:res.statusText})); setStatus('bad', err.detail); }
+  });
+  btnStop.addEventListener('click', async () => {
+    await fetch(`${base()}/replay/stop`, {method:'POST'});
+    btnStart.disabled = false; btnStop.disabled = true;
+  });
+
+  renderLiveMap();
+  connect(); // best-effort on load; harmless if nothing is listening yet
+})();
 </script>
 </body>
 </html>

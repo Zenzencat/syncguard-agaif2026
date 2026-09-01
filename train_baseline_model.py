@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import joblib
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -148,3 +149,27 @@ with open(SCRIPT_DIR / "baseline_model_report.md", "w", encoding="utf-8") as f:
     f.write("## Feature importances\n\n```\n" + importances.to_string() + "\n```\n")
 
 print("\nWrote baseline_model_report.md")
+
+# --- Persist the fitted pipeline so downstream consumers (the FastAPI service, the spatial
+# layer, the demo script) can load a saved artifact instead of re-fitting in memory on every
+# run. Does not change any metric/plot/report above -- this is purely additive. Severity
+# floor/ceiling (median clean-row proba / 90th-pct attack-row proba on this same held-out set)
+# are bundled in so consumers don't need processed/syncguard_features.parquet at runtime just
+# to compute them -- same values/methodology already used in build_spatial_simulation.py. ---
+floor = float(np.median(y_proba[y_test.values == 0]))
+ceiling = float(np.percentile(y_proba[y_test.values == 1], 90))
+MODELS_DIR = SCRIPT_DIR / "models"
+MODELS_DIR.mkdir(exist_ok=True)
+# Named model_baseline.joblib (not model.joblib) so it never silently overwrites the tuned
+# artifact from train_improved_model.py, which is what the API serves by default -- see
+# ROBUSTNESS_NOTES.md.
+model_path = MODELS_DIR / "model_baseline.joblib"
+joblib.dump({
+    "pipeline": clf,
+    "feature_cols": feature_cols,
+    "decision_threshold": 0.5,
+    "severity_floor": floor,
+    "severity_ceiling": ceiling,
+    "model_version": "baseline",
+}, model_path)
+print(f"Saved trained pipeline to {model_path}")

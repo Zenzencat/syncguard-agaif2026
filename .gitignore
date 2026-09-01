@@ -2,7 +2,27 @@
 __pycache__/
 *.pyc
 
-# Raw dataset (~1.4GB extracted, ~375MB compressed) and derived outputs are not tracked here —
-# download the dataset per README.md, and regenerate processed/ by running the scripts.
+# Raw dataset (~1.4GB extracted, ~375MB compressed) is not tracked here -- download it per
+# README.md. processed/ and spatial_raw/ are mostly regenerated-output directories (plots,
+# the full feature CSV, the bootcamp tower zip) EXCEPT for the two small files the API needs
+# to run out of the box, which are committed: processed/syncguard_features.parquet (~5MB) and
+# the real Telkomsel tower CSV -- see README.md "Serving layer" for why these two are the
+# exception to "regenerate everything else by running the scripts".
 raw/
-processed/
+processed/*
+!processed/syncguard_features.parquet
+
+spatial_raw/*
+!spatial_raw/Module 6_AD1002_Dataset (Tower)/
+!spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv
+
+# Trained model artifact — produced by `make train` (train_baseline_model.py +
+# train_improved_model.py), not committed. The Docker image builds it at image-build time.
+models/
+
+# Runtime DB for the persistence layer (api/) — regenerated on each run. WAL mode (see
+# api/db.py) also creates -wal/-shm sidecar files alongside the .db itself.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
