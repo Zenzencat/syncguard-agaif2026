@@ -44,6 +44,11 @@ CREATE INDEX IF NOT EXISTS idx_scored_events_tower ON scored_events(tower_site_i
 # EventStore.__init__ so existing local DBs from before this change don't break.
 _MIGRATIONS = [
     "ALTER TABLE scored_events ADD COLUMN top_features_json TEXT",
+    # Alert hysteresis (api/hysteresis.py, OPERATIONAL_METRICS.md) -- 'normal' or 'alerting',
+    # computed per replay session over the recording's real temporal order, never per
+    # simulated tower. NULL for events scored before this migration or via /score (hysteresis
+    # doesn't apply to stateless ad-hoc calls -- see api/hysteresis.py's module docstring).
+    "ALTER TABLE scored_events ADD COLUMN alert_state TEXT",
 ]
 
 
@@ -79,8 +84,8 @@ class EventStore:
                    (created_at, source, run_id, scenario_id, attack_type, true_attack,
                     probability, severity, predicted_label, model_version,
                     tower_site_id, tower_site_name, tower_lat, tower_lon,
-                    correlation_score, features_json, top_features_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    correlation_score, features_json, top_features_json, alert_state)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     event.get("created_at") or datetime.now(timezone.utc).isoformat(),
                     event["source"],
@@ -99,6 +104,7 @@ class EventStore:
                     event.get("correlation_score"),
                     json.dumps(event.get("features")) if event.get("features") is not None else None,
                     json.dumps(event.get("top_features")) if event.get("top_features") is not None else None,
+                    event.get("alert_state"),
                 ),
             )
             self._conn.commit()

@@ -97,6 +97,8 @@
   .pill.ok{background:#0f2a29; color:var(--real); border:1px solid var(--real-border);}
   .pill.bad{background:#2a1414; color:#ff6b6b; border:1px solid #7a2323;}
   .pill.pending{background:#221c0f; color:#e6c34d; border:1px solid #6b5a1f;}
+  .pill.alerting{background:#2a1414; color:#ff8a3d; border:1px solid #a8541c;}
+  .pill.normal{background:#0f2a29; color:var(--real); border:1px solid var(--real-border);}
   .btn{
     background:#182636; color:var(--text); border:1px solid var(--panel-border); border-radius:6px;
     padding:8px 16px; cursor:pointer; font-size:13px; font-weight:700;
@@ -185,6 +187,9 @@
       <button class="btn primary" id="btn-start" disabled>Start replay</button>
       <button class="btn stop" id="btn-stop" disabled>Stop</button>
       <div class="counter"><span id="replay-count">0</span> events scored this session</div>
+      <span class="pill normal" id="alert-pill" title="Debounced over this recording's real reading sequence — 3 consecutive above-threshold readings to alert, 5 below to clear. Not naive per-event flagging.">
+        <span class="dot"></span><span id="alert-pill-text">normal</span>
+      </span>
     </div>
 
     <h3>Spatial statistics — global Moran's I &amp; Local Moran's I (LISA)</h3>
@@ -202,7 +207,8 @@
 
     <div class="grid2">
       <div>
-        <h3>Live tower map (fill = live severity; ring = significant LISA cluster/outlier)</h3>
+        <h3>Live tower map (fill = live severity; ring = significant LISA cluster/outlier; ◆ = alerting, hysteresis-confirmed)</h3>
+        <p class="note" style="margin:0 0 8px;">A tower can show elevated (red) severity <em>without</em> a diamond — that's a single flickering reading, not yet confirmed. The diamond only appears after the debounce streak — see <code>OPERATIONAL_METRICS.md</code> for why naive per-event alerting would spam.</p>
         <div id="live-map" style="width:100%;height:420px;"></div>
       </div>
       <div>
@@ -413,12 +419,13 @@ Plotly.newPlot('fi-chart', [{
   let eventSource = null;
   let sessionCount = 0;
   let moranTimer = null;
-  const liveSeverity = new Map(); // site_id -> {lat, lon, name, severity, correlation, event_id}
+  const liveSeverity = new Map(); // site_id -> {lat, lon, name, severity, correlation, event_id, alert_state}
   const lisaByTower = new Map();  // site_id -> {quadrant, label, p_value, significant}
   const eventsById = new Map();   // event_id -> {top_features, attack_type, tower, severity, predicted_label, ...}
   let allTowers = [];
   const moranIEl = $('moran-i'), moranPEl = $('moran-p'), moranNEl = $('moran-n');
   const speedHintEl = $('speed-hint'), explainPanel = $('explain-panel');
+  const alertPillEl = $('alert-pill'), alertPillTextEl = $('alert-pill-text');
   const LISA_RING_COLOR = {1:'#ff3b3b', 2:'#b56bff', 3:'#4da3ff', 4:'#b56bff'}; // HH,LH,LL,HL
   const LIVE_EXPLAIN_MAX_SPEED = 20; // must match api/replay.py's LIVE_EXPLAIN_MAX_SPEED
 
@@ -463,7 +470,15 @@ Plotly.newPlot('fi-chart', [{
       hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#b56bff', font:{color:'#EAF1F7', size:12}},
       showlegend:false,
     } : null;
-    const traces = [base, activeTrace, lisaTrace].filter(Boolean);
+    const alerting = active.filter(t => t.alert_state === 'alerting');
+    const alertTrace = alerting.length ? {
+      type:'scattergl', mode:'markers', x: alerting.map(t=>t.lon), y: alerting.map(t=>t.lat),
+      marker:{symbol:'diamond', size:9, color:'#ff8a3d', line:{color:'#0A121C', width:1}},
+      text: alerting.map(t => `<b>${t.site_id}</b> — ALERTING (hysteresis-confirmed)<br>Debounced over this recording's real reading sequence -- not a single flickering event.`),
+      hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#ff8a3d', font:{color:'#EAF1F7', size:12}},
+      showlegend:false,
+    } : null;
+    const traces = [base, activeTrace, lisaTrace, alertTrace].filter(Boolean);
     const liveLayout = {
       paper_bgcolor:'#0A121C', plot_bgcolor:'#0A121C', font:{color:'#EAF1F7'},
       margin:{l:50,r:20,t:10,b:40},
@@ -582,6 +597,7 @@ Plotly.newPlot('fi-chart', [{
         liveSeverity.set(e.tower_site_id, {
           site_id: e.tower_site_id, name: e.tower_site_name, lat: e.tower_lat, lon: e.tower_lon,
           severity: e.severity, correlation: e.correlation_score ?? 0, event_id: e.id,
+          alert_state: e.alert_state,
         });
         eventsById.set(e.id, {
           event_id: e.id, attack_type: e.attack_type, severity: e.severity,
@@ -610,11 +626,16 @@ Plotly.newPlot('fi-chart', [{
       liveSeverity.set(ev.tower.site_id, {
         site_id: ev.tower.site_id, name: ev.tower.site_name, lat: ev.tower.lat, lon: ev.tower.lon,
         severity: ev.severity, correlation: ev.correlation_score ?? 0, event_id: ev.event_id,
+        alert_state: ev.alert_state,
       });
       renderLiveMap();
       logEvent(ev);
       sessionCount += 1;
       countEl.textContent = sessionCount;
+      if(ev.alert_state){
+        alertPillEl.className = 'pill ' + ev.alert_state;
+        alertPillTextEl.textContent = ev.alert_state;
+      }
     };
     eventSource.onerror = () => setStatus('bad', 'stream disconnected — click Connect to retry');
   }

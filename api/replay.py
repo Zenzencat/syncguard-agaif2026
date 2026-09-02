@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import pandas as pd
 
+from api.hysteresis import AlertHysteresis
+
 DATA_PATH = Path(__file__).resolve().parent.parent / "processed" / "syncguard_features.parquet"
 DEFAULT_SCENARIO = {"attack_type": "Spoofing", "scenario_id": "2.1.1"}  # same scenario demo_prediction_visualization.py uses
 MIN_SLEEP_S = 0.02
@@ -24,15 +26,15 @@ MAX_ROW_GAP_S = 5.0  # clamp real inter-row gaps (e.g. across a data dropout) so
 
 # SHAP TreeExplainer costs ~45-55ms/row (exact Tree SHAP over 300 trees, confirmed -- no
 # faster mode without sacrificing exactness, see SHAP_EXPLAINABILITY.md) -- computing it
-# inline on every replayed row would throttle replay to ~20 rows/sec regardless of the
-# requested speed multiplier. LIVE_EXPLAIN_MAX_SPEED is the speed threshold below which
-# that cost is absorbed into the replay's own natural per-row cadence anyway (at speed=20,
-# the ~1Hz dataset's per-row gap is already ~50ms -- almost exactly the SHAP cost -- so
-# inline explanation is nearly free there) and above which it's skipped so replay stays at
-# full requested speed. Skipped rows are not permanently unexplainable: GET
-# /events/{id}/explain computes SHAP on-demand from the event's own stored feature values,
-# lazily, the first time anyone actually asks -- see SHAP_EXPLAINABILITY.md's full writeup
-# of this tradeoff.
+# inline on every replayed row would throttle replay well below the requested speed
+# multiplier (measured directly: OPERATIONAL_METRICS.md). LIVE_EXPLAIN_MAX_SPEED=20 is the
+# threshold below which that cost stays roughly comparable to the loop's own per-row work
+# (real measured throughput ~5 rows/sec at speed=10 with live SHAP, vs ~15 rows/sec above the
+# threshold without it -- both well below the nominal multiplier for reasons unrelated to
+# SHAP too, see OPERATIONAL_METRICS.md's throughput section) and above which live explanation
+# is skipped so replay stays as fast as it can. Skipped rows are not permanently
+# unexplainable: GET /events/{id}/explain computes SHAP on-demand from the event's own stored
+# feature values, lazily, the first time anyone actually asks.
 LIVE_EXPLAIN_MAX_SPEED = 20.0
 
 
@@ -105,6 +107,9 @@ class ReplayManager:
         self._total_rows = 0
         self._error: str | None = None
         self._live_explain = True
+        # Fresh per replay session -- see api/hysteresis.py's module docstring for why this is
+        # per-recording, not per simulated tower.
+        self._hysteresis = AlertHysteresis()
 
     @property
     def status(self) -> dict:
@@ -116,6 +121,7 @@ class ReplayManager:
             "total_rows": self._total_rows,
             "error": self._error,
             "live_explain": self._live_explain,
+            "alert_state": self._hysteresis.state,
         }
 
     def start(self, run_id: str | None, speed: float):
@@ -126,6 +132,7 @@ class ReplayManager:
         self._rows_replayed = 0
         self._error = None
         self._live_explain = self._speed <= LIVE_EXPLAIN_MAX_SPEED
+        self._hysteresis = AlertHysteresis()  # a new session starts with no prior streak
         self._status = "running"
         self._task = asyncio.create_task(self._run(resolved_run_id, self._speed))
         return self.status
@@ -147,6 +154,9 @@ class ReplayManager:
                             for c in self._model.feature_cols}
                 result = self._model.score(features)
                 top_features = self._model.explain(features) if self._live_explain else None
+                # Real temporal order (this recording's own row sequence), not per-tower --
+                # see api/hysteresis.py.
+                alert_state = self._hysteresis.update(result["predicted_label"] == "attack")
 
                 tower = self._attributor.next_tower()
                 corr = self._correlation.correlate(tower["site_id"])
@@ -170,6 +180,7 @@ class ReplayManager:
                     "correlation_score": corr.correlation_score,
                     "features": features,
                     "top_features": top_features,
+                    "alert_state": alert_state,
                 })
 
                 self._bus.publish({
@@ -183,6 +194,7 @@ class ReplayManager:
                     "tower": tower,
                     "correlation_score": corr.correlation_score,
                     "top_features": top_features,
+                    "alert_state": alert_state,
                 })
 
                 self._rows_replayed += 1

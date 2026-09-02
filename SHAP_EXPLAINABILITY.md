@@ -48,11 +48,24 @@ not all 23 — the full vector is too noisy to read at a glance in a UI or durin
 Exact Tree SHAP over 300 trees costs **~45-55ms per row**, measured directly (single-row and
 batched — batching doesn't amortize the cost; it's genuinely a per-row expense, not a
 fixed-overhead one). For `POST /score` — one ad-hoc request — that's imperceptible. For
-**replay**, it's a real constraint: computed inline on every row, it becomes the throughput
-ceiling, capping effective replay speed at ~20 rows/sec *regardless of the requested speed
-multiplier*. A `speed=200` replay that currently finishes 2503 rows in ~15 seconds would take
-a minimum of ~125 seconds with SHAP computed unconditionally on every row — not a crash, just
-a silently slower demo than the speed selector implies.
+**replay**, it's a real constraint: computed inline on every row, it meaningfully throttles
+throughput.
+
+**Correction, made honestly rather than left standing**: an earlier version of this
+document estimated replay throughput from the nominal speed multiplier alone ("~20 rows/sec
+regardless of speed," "speed=200 finishes 2503 rows in ~15 seconds without SHAP") without
+actually measuring it. `OPERATIONAL_METRICS.md` benchmarks it directly and both estimates
+were wrong: real measured throughput is **~5.3 rows/sec at speed=10 with live SHAP** and
+**~14-16 rows/sec above the cutoff without it** — well below the nominal multiplier either
+way, because the replay loop computes-then-sleeps additively (not overlapped) and
+`asyncio.sleep()` itself overshoots its nominal duration by ~35-55% on this Windows
+deployment (measured root cause, not assumed — see `OPERATIONAL_METRICS.md` §2). At the
+*measured* rates, a full 2503-row replay takes on the order of 8 minutes with live SHAP at
+speed=10, or ~2.5-3 minutes above the cutoff without it — not the 15 seconds to ~2 minutes
+this document originally implied. The speed-gating design below is still the right call (the
+relative gap between "live SHAP" and "no live SHAP" throughput is real and large), but the
+absolute numbers here were corrected against real measurement, not left as an untested
+estimate.
 
 **Design chosen: speed-gated live computation, with lazy on-demand fallback — not an
 all-or-nothing choice.**
@@ -61,11 +74,15 @@ all-or-nothing choice.**
   single-request path where 50ms is free.
 - Replay computes SHAP live only when `speed <= LIVE_EXPLAIN_MAX_SPEED = 20`
   (`api/replay.py`). **Why 20, specifically, not an arbitrary round number**: the dataset
-  replays at ~1Hz in real time, so at speed=20 the replay loop's own natural per-row delay is
-  already ~50ms (`1s / 20`) — almost exactly the SHAP cost. Below that threshold, live SHAP
-  is nearly free because the loop was already going to wait about that long anyway; above it,
-  SHAP would start dominating the loop's timing and silently override the requested pace.
-  This is a threshold read directly off the measured cost, not picked for a round number.
+  replays at ~1Hz in real time, so at speed=20 the replay loop's *nominal* per-row delay is
+  ~50ms (`1s / 20`) — the same order of magnitude as the SHAP cost, so the relative slowdown
+  from adding it stays bounded rather than compounding at higher multipliers where the
+  nominal delay is much smaller than 50ms. (The loop's *actual* per-row delay is higher than
+  nominal either way — see the correction above and `OPERATIONAL_METRICS.md` §2 for why — so
+  "nearly free" was an overstatement; the threshold is still the right one, just for a more
+  modest reason than originally claimed.) Below the threshold, live SHAP roughly matches the
+  order of magnitude of cost the loop already carries; above it, SHAP would dominate and
+  silently override the requested pace far more than it already does.
 - Above that speed, live SHAP is skipped entirely (`top_features` stored as `NULL`) and
   replay runs at full requested speed. **Nothing scored this way is permanently
   unexplainable** — `GET /events/{id}/explain` recomputes SHAP on demand from the event's own

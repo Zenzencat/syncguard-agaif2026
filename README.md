@@ -33,6 +33,7 @@ Full background, methodology, and honest limitations are in [`project_abstract.m
 | `api/` | FastAPI serving layer: `/score`, `/health`, simulated live replay (`/replay/*`, SSE `/stream/events`), real distance-weighted spatial correlation (`api/spatial.py`), global/local Moran's I spatial statistics (`api/spatial_stats.py`), and SQLite persistence (`api/db.py`). See "Serving layer" below. |
 | `SPATIAL_STATISTICS.md` | Global Moran's I / Local Moran's I (LISA) method, weights choice, and worked examples from a real replay — the established-GeoAI layer alongside the hand-rolled correlation. |
 | `SHAP_EXPLAINABILITY.md` | Per-prediction SHAP explainability method, the speed/live-vs-on-demand design tradeoff, and a per-event sanity check against the baseline report's global feature importances (including a genuine nuance found, not just confirmed). |
+| `OPERATIONAL_METRICS.md` | Measured scoring latency, replay throughput, concurrent-request behavior during replay, and the alert-hysteresis design/verification — real benchmarks, including two corrections to earlier unmeasured assumptions in this repo's own docs. |
 | `Makefile`, `Dockerfile`, `docker-compose.yml` | One-command setup/train/serve, and containerization — see "Serving layer" and "Containerization" below. |
 | `requirements-api.txt` | FastAPI/uvicorn/pydantic — kept separate from `requirements.txt` (the original detector's pinned deps) rather than merged into it. |
 
@@ -170,20 +171,33 @@ docstring for the exact split, summarized here:
   `GET /events/{id}/explain`) — exact Tree SHAP over the shipped RandomForest, top 5 features
   by contribution for any individual prediction, not just the model's global feature
   importances. `POST /score` always computes it; replay computes it live only up to
-  `speed<=20` (above that it would throttle replay to ~20 rows/sec) and explains any
-  skipped event lazily on demand instead — full method, the speed/design tradeoff, and real
-  worked examples (including a genuinely ambiguous near-threshold case) in
+  `speed<=20` (above that, live replay throughput is too high relative to SHAP's ~50ms/row
+  cost — see `OPERATIONAL_METRICS.md` for the measured numbers) and explains any skipped
+  event lazily on demand instead — full method, the speed/design tradeoff, and real worked
+  examples (including a genuinely ambiguous near-threshold case) in
   [`SHAP_EXPLAINABILITY.md`](SHAP_EXPLAINABILITY.md).
+- **Alert hysteresis / debouncing** (`api/hysteresis.py`) — a tower only shows as actively
+  `alerting` after 3 consecutive above-threshold readings (both configurable), and only clears
+  back to `normal` after 5 consecutive below-threshold — computed per replay session over the
+  recording's real temporal order (not per simulated tower — see `OPERATIONAL_METRICS.md` for
+  why), so a single flickering reading never spams an alert. Surfaced via `GET /events/map`,
+  `GET /replay/status`, and a distinct ◆ marker on the live map.
+- **Operational metrics** — real measured scoring latency (p50/p95/p99), replay throughput,
+  and concurrent-request behavior during replay, including two findings that corrected
+  earlier unmeasured assumptions in this repo's own docs rather than leaving them standing —
+  see [`OPERATIONAL_METRICS.md`](OPERATIONAL_METRICS.md), direct ammunition for the
+  Feasibility/Scalability side of the pitch.
 - **SQLite persistence** (`api/db.py`) — every scored event (from `/score` or replay) is
   written to `data/syncguard.db` (`scored_events` table), including ground-truth labels for
-  replayed rows (for demo purposes — a real `/score` call has no ground truth) and, once
-  computed, its SHAP top-features explanation.
+  replayed rows (for demo purposes — a real `/score` call has no ground truth), its SHAP
+  top-features explanation once computed, and its hysteresis-debounced `alert_state`.
 - **Dashboard**: `GET /dashboard` serves `syncguard_interactive_summary.html`, which now has a
   live-replay section (top of the page) that talks to this API — connects, lets you pick a
   scenario and speed, and renders the live tower map + event log via SSE, with Global Moran's
-  I/p-value headline stats and LISA cluster/outlier rings on the map, refreshed every few
-  seconds, plus a click-to-explain panel (event log row or map marker) showing why that
-  prediction was made. Everything below that section is unchanged and still fully
+  I/p-value headline stats, LISA cluster/outlier rings, and hysteresis-confirmed alert
+  diamonds on the map, refreshed live, plus a click-to-explain panel (event log row or map
+  marker) showing why that prediction was made. Everything below that section is unchanged
+  and still fully
   static/offline.
 
 ```bash
