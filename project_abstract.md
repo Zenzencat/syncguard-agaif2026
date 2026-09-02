@@ -86,6 +86,22 @@ public dataset of real telecom base-station GNSS timing under spoofing currently
 is a genuine limitation of the evidence base available for this hackathon timeline, and is
 carried forward explicitly into the roadmap below rather than left implicit.
 
+**A second axis of the same gap — receiver motion.** A base-station GNSSDO is bolted to a
+fixed site; the deployment-relevant receiver state is therefore *stationary*, with a stable
+sky view and multipath environment. The Jammertest 2024 dataset is roughly half
+vehicle-mounted (**13 of 24 recordings are `dynamic`, 11 are `stationary`**), and the dynamic
+recordings carry receiver-motion effects — changing satellite geometry, obstruction as the
+vehicle passes buildings or terrain, movement-induced multipath — that a fixed installation
+does not. Metrics pooled across both states (including the headline results in §5) are thus
+not a clean estimate of stationary-deployment performance; a later feature-set investigation
+found that the recordings where added signal-quality features misfired were *all* dynamic
+(`SPOOFING_FEATURES.md`). The natural correction — evaluate on stationary recordings only —
+is blocked by data volume: of the 7 jamming recordings, **only 1 is stationary**, too few to
+hold out or cross-validate, so jamming detection cannot be assessed within the correctly
+scoped (stationary-only) problem on this dataset. That is a limitation of the available data,
+not a negative result about the method; it is documented in full in `STATIONARY_SCOPE.md` and
+folded into roadmap step (1) below.
+
 ### Spatial layer data — real infrastructure, SIMULATED spread (read this split carefully)
 
 To address the gap named above — the Jammertest 2024 detector has no spatial component, so it
@@ -149,7 +165,11 @@ of 44,639 rows), so every attack-type × receiver-state combination present in t
 represented in both splits, and the model is genuinely tested on recordings it never saw
 during training. Scenario metadata (attack type, receiver state, frequency band, timestamps)
 was excluded from the feature matrix itself — a deployed detector would not have this as
-ground truth, only the signal measurements.
+ground truth, only the signal measurements. Note that this split pools stationary and dynamic
+recordings; per the receiver-motion framing gap in §3, the dynamic recordings are not
+representative of a fixed base-station installation, and the dataset is too thin in stationary
+jamming data (1 recording) to re-run the evaluation on stationary-only data — see
+`STATIONARY_SCOPE.md`.
 
 **Spatial simulation methodology** (see §3 for the real/SIMULATED data split this builds on):
 the detector above is not retrained or modified for this step — its held-out-set
@@ -259,7 +279,8 @@ the underlying network telemetry and timing are themselves trustworthy. SyncGuar
 precondition rather than sitting on top of it.
 
 **Implementation roadmap**: (1) pilot validation against an operator's own base-station GNSS
-logs, to close the framing gap named above with real infrastructure data; (2) field validation
+logs — real infrastructure data, and stationary by nature, closing both axes of the framing
+gap named in §3 (receiver type and receiver motion); (2) field validation
 and threshold tuning per deployment site; (3) engineering feasibility assessment for on-site
 (edge) deployment; (4) phased operational rollout with the 4-dimension monitoring plan already
 mapped from the curriculum (Module 7 Session 4 — System health, Input data validity, Model
