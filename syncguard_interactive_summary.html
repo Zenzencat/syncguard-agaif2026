@@ -123,6 +123,26 @@
   .lisa-legend span{display:inline-flex; align-items:center; gap:5px;}
   .lisa-legend .ring{width:11px; height:11px; border-radius:50%; border:2.5px solid; display:inline-block;}
   .ring.hh{border-color:#ff3b3b;} .ring.ll{border-color:#4da3ff;} .ring.outlier{border-color:#b56bff;}
+
+  /* ---- SHAP explanation panel ---- */
+  #live-log .row{cursor:pointer;}
+  #live-log .row.head{cursor:default;}
+  #live-log .row:hover:not(.head){background:#152234;}
+  #explain-panel{
+    background:#0d1622; border:1px solid var(--panel-border); border-radius:10px;
+    padding:14px 18px; margin-top:14px; font-size:13px;
+  }
+  #explain-panel .ph{color:var(--muted); font-size:13px;}
+  #explain-summary{font-weight:700; margin-bottom:10px; font-size:13.5px;}
+  .shap-bar-row{display:grid; grid-template-columns:150px 1fr 60px; align-items:center; gap:10px; margin:6px 0;}
+  .shap-bar-row .fname{font-size:12px; color:var(--text); text-align:right; font-family:Consolas,monospace;}
+  .shap-bar-track{background:#182636; border-radius:4px; height:16px; position:relative; overflow:hidden;}
+  .shap-bar-fill{position:absolute; top:0; bottom:0; border-radius:4px;}
+  .shap-bar-fill.attack{background:#ff3b3b; right:50%;}
+  .shap-bar-fill.clean{background:#3fb8af; left:50%;}
+  .shap-bar-track .mid{position:absolute; left:50%; top:0; bottom:0; width:1px; background:#4a5a6e;}
+  .shap-val{font-size:11.5px; color:var(--muted); font-family:Consolas,monospace;}
+  #explain-btn{margin-top:6px;}
 </style>
 </head>
 <body>
@@ -161,6 +181,7 @@
         <option value="25">25x</option>
         <option value="50">50x</option>
       </select>
+      <span class="note" id="speed-hint" style="margin:0;"></span>
       <button class="btn primary" id="btn-start" disabled>Start replay</button>
       <button class="btn stop" id="btn-stop" disabled>Stop</button>
       <div class="counter"><span id="replay-count">0</span> events scored this session</div>
@@ -191,6 +212,10 @@
         </div>
       </div>
     </div>
+    <h3>Why was this flagged? (SHAP per-prediction explanation)</h3>
+    <p class="note">Click a live-map marker or an event-log row to see the top features driving <em>that specific</em> prediction (exact Tree SHAP over the shipped RandomForest — signed contribution to the attack probability, not just a ranking). At replay speeds ≤20x, every event is explained live; faster than that, live explanation is skipped to keep replay at full speed, and an <b>Explain</b> button computes it on demand instead — see <code>SHAP_EXPLAINABILITY.md</code> for why and how this tradeoff is designed.</p>
+    <div id="explain-panel"><span class="ph">Click a map marker or log row above to see why it was flagged.</span></div>
+
     <p class="note">If "not connected": start the API from the repo root (<code>make train &amp;&amp; make serve</code>, or <code>docker compose up --build</code>) and click Connect. This section is the only part of the page that talks to a server — everything below is still fully static/offline.</p>
   </section>
 
@@ -388,11 +413,14 @@ Plotly.newPlot('fi-chart', [{
   let eventSource = null;
   let sessionCount = 0;
   let moranTimer = null;
-  const liveSeverity = new Map(); // site_id -> {lat, lon, name, severity, correlation}
+  const liveSeverity = new Map(); // site_id -> {lat, lon, name, severity, correlation, event_id}
   const lisaByTower = new Map();  // site_id -> {quadrant, label, p_value, significant}
+  const eventsById = new Map();   // event_id -> {top_features, attack_type, tower, severity, predicted_label, ...}
   let allTowers = [];
   const moranIEl = $('moran-i'), moranPEl = $('moran-p'), moranNEl = $('moran-n');
+  const speedHintEl = $('speed-hint'), explainPanel = $('explain-panel');
   const LISA_RING_COLOR = {1:'#ff3b3b', 2:'#b56bff', 3:'#4da3ff', 4:'#b56bff'}; // HH,LH,LL,HL
+  const LIVE_EXPLAIN_MAX_SPEED = 20; // must match api/replay.py's LIVE_EXPLAIN_MAX_SPEED
 
   function base(){ return apiBaseInput.value.replace(/\/$/, ''); }
   function setStatus(kind, text){
@@ -409,12 +437,13 @@ Plotly.newPlot('fi-chart', [{
     const active = [...liveSeverity.values()];
     const activeTrace = {
       type:'scattergl', mode:'markers', x: active.map(t=>t.lon), y: active.map(t=>t.lat),
+      customdata: active.map(t=>t.site_id),
       marker:{
         color: active.map(t=>t.severity), colorscale: severityColorScale(), cmin:0, cmax:1,
         size: active.map(t=>10+22*t.severity), line:{color:'#0A121C', width:1},
         colorbar:{title:{text:'Live severity', font:{color:'#EAF1F7', size:11}}, tickfont:{color:'#94A7BA', size:10}, outlinewidth:0, len:0.85},
       },
-      text: active.map(t => `<b>${t.site_id}</b> — ${t.name}<br>Live severity: <b>${t.severity.toFixed(3)}</b><br>Correlation (real, distance-weighted): ${t.correlation.toFixed(3)}<br><i>Tower attribution SIMULATED (round-robin)</i>`),
+      text: active.map(t => `<b>${t.site_id}</b> — ${t.name}<br>Live severity: <b>${t.severity.toFixed(3)}</b><br>Correlation (real, distance-weighted): ${t.correlation.toFixed(3)}<br><i>Tower attribution SIMULATED (round-robin)</i><br><i>Click to see why (SHAP)</i>`),
       hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#1f5f8f', font:{color:'#EAF1F7', size:12}},
       showlegend:false,
     };
@@ -446,13 +475,68 @@ Plotly.newPlot('fi-chart', [{
   }
 
   function logEvent(ev){
+    eventsById.set(ev.event_id, ev);
     const row = document.createElement('div');
     row.className = 'row ' + (ev.predicted_label === 'attack' ? 'attack' : 'clean');
     const t = new Date(ev.created_at).toLocaleTimeString();
     row.innerHTML = `<div>${t}</div><div>${ev.attack_type ?? '—'}</div><div>${ev.tower?.site_id ?? '—'}</div>` +
                      `<div>${ev.severity.toFixed(3)}</div><div>${ev.correlation_score.toFixed(3)}</div>`;
+    row.addEventListener('click', () => showExplanation(ev.event_id));
     logEl.insertBefore(row, logEl.children[1] || null);
     while (logEl.children.length > 60) logEl.removeChild(logEl.lastChild);
+  }
+
+  function shapBarsHtml(topFeatures){
+    const maxAbs = Math.max(...topFeatures.map(f => Math.abs(f.shap_value)), 1e-6);
+    return topFeatures.map(f => {
+      const pct = Math.min(100, Math.abs(f.shap_value) / maxAbs * 48); // up to 48% of track width per side
+      const cls = f.direction === 'toward attack' ? 'attack' : 'clean';
+      const style = cls === 'attack' ? `width:${pct}%;` : `width:${pct}%;`;
+      const valStr = (f.feature_value === null || f.feature_value === undefined) ? '—' : f.feature_value.toFixed(2);
+      return `<div class="shap-bar-row">
+        <div class="fname">${f.feature}</div>
+        <div class="shap-bar-track"><div class="mid"></div><div class="shap-bar-fill ${cls}" style="${style}"></div></div>
+        <div class="shap-val">${f.shap_value>=0?'+':''}${f.shap_value.toFixed(3)}</div>
+      </div>
+      <div style="grid-column:1/-1; margin:-4px 0 4px 160px; font-size:10.5px; color:var(--muted);">value=${valStr} · ${f.direction}</div>`;
+    }).join('');
+  }
+
+  function renderExplanation(ev, topFeatures){
+    const summary = `<b>${ev.tower?.site_id ?? ev.tower_site_id ?? '—'}</b> — ` +
+      `${ev.attack_type ?? ''} · severity ${(ev.severity).toFixed(3)} · predicted <b>${(ev.predicted_label||'').toUpperCase()}</b>`;
+    explainPanel.innerHTML =
+      `<div id="explain-summary">${summary}</div>` +
+      `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Exact Tree SHAP over the shipped RandomForest — red = pushes toward attack, teal = pushes toward clean. Bar length ∝ |contribution|.</div>` +
+      shapBarsHtml(topFeatures);
+  }
+
+  async function showExplanation(eventId){
+    if(eventId === undefined || eventId === null){
+      explainPanel.innerHTML = `<span class="ph">This event has no id to explain.</span>`;
+      return;
+    }
+    const ev = eventsById.get(eventId) || {event_id: eventId};
+    if(ev.top_features){
+      renderExplanation(ev, ev.top_features);
+      return;
+    }
+    explainPanel.innerHTML = `<div id="explain-summary">Event #${eventId} — not explained live (fast replay, &gt;${LIVE_EXPLAIN_MAX_SPEED}x).</div>` +
+      `<button class="btn primary" id="explain-btn">Explain (compute SHAP now)</button>`;
+    document.getElementById('explain-btn').addEventListener('click', async () => {
+      explainPanel.innerHTML = `<span class="ph">Computing SHAP explanation…</span>`;
+      try{
+        const d = await fetch(`${base()}/events/${eventId}/explain`).then(r => {
+          if(!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        });
+        ev.top_features = d.top_features;
+        eventsById.set(eventId, ev);
+        renderExplanation(ev, d.top_features);
+      }catch(err){
+        explainPanel.innerHTML = `<span class="ph">Could not explain event #${eventId}: ${err.message}</span>`;
+      }
+    });
   }
 
   async function fetchAutocorrelation(){
@@ -494,10 +578,17 @@ Plotly.newPlot('fi-chart', [{
       ).join('');
 
       const mapState = await fetch(base() + '/events/map').then(r => r.json());
-      mapState.forEach(e => liveSeverity.set(e.tower_site_id, {
-        site_id: e.tower_site_id, name: e.tower_site_name, lat: e.tower_lat, lon: e.tower_lon,
-        severity: e.severity, correlation: e.correlation_score ?? 0,
-      }));
+      mapState.forEach(e => {
+        liveSeverity.set(e.tower_site_id, {
+          site_id: e.tower_site_id, name: e.tower_site_name, lat: e.tower_lat, lon: e.tower_lon,
+          severity: e.severity, correlation: e.correlation_score ?? 0, event_id: e.id,
+        });
+        eventsById.set(e.id, {
+          event_id: e.id, attack_type: e.attack_type, severity: e.severity,
+          predicted_label: e.predicted_label, top_features: e.top_features,
+          tower: {site_id: e.tower_site_id}, tower_site_id: e.tower_site_id,
+        });
+      });
       renderLiveMap();
       openStream();
 
@@ -518,7 +609,7 @@ Plotly.newPlot('fi-chart', [{
       if(!ev.tower) return;
       liveSeverity.set(ev.tower.site_id, {
         site_id: ev.tower.site_id, name: ev.tower.site_name, lat: ev.tower.lat, lon: ev.tower.lon,
-        severity: ev.severity, correlation: ev.correlation_score ?? 0,
+        severity: ev.severity, correlation: ev.correlation_score ?? 0, event_id: ev.event_id,
       });
       renderLiveMap();
       logEvent(ev);
@@ -541,8 +632,27 @@ Plotly.newPlot('fi-chart', [{
     btnStart.disabled = false; btnStop.disabled = true;
   });
 
+  function updateSpeedHint(){
+    const s = Number(speedSelect.value);
+    speedHintEl.textContent = s <= LIVE_EXPLAIN_MAX_SPEED
+      ? `≤${LIVE_EXPLAIN_MAX_SPEED}x — every event explained live`
+      : `>${LIVE_EXPLAIN_MAX_SPEED}x — live explain skipped, use the Explain button per-event`;
+  }
+  speedSelect.addEventListener('change', updateSpeedHint);
+  updateSpeedHint();
+
   renderLiveMap();
   connect(); // best-effort on load; harmless if nothing is listening yet
+
+  // Map marker clicks -> explain that tower's most recent event. Attached once; Plotly.react
+  // (used by every renderLiveMap() call) preserves listeners on the same div.
+  document.getElementById('live-map').on('plotly_click', (evt) => {
+    const pt = evt.points && evt.points[0];
+    const siteId = pt && pt.customdata;
+    if(!siteId) return;
+    const tower = liveSeverity.get(siteId);
+    if(tower && tower.event_id !== undefined) showExplanation(tower.event_id);
+  });
 })();
 </script>
 </body>

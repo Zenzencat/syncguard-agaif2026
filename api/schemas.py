@@ -47,6 +47,13 @@ class TelemetryInput(BaseModel):
     tower_site_id: Optional[str] = Field(default=None, description="Real Telkomsel site_id (see spatial_raw tower CSV) if the caller knows which tower this reading is from -- enables live spatial correlation for this event. Omit if unknown.")
 
 
+class TopFeature(BaseModel):
+    feature: str
+    shap_value: float = Field(description="Signed SHAP contribution to the attack-class probability -- positive pushes toward attack, negative toward clean")
+    feature_value: Optional[float] = Field(default=None, description="This row's raw (imputed) value for the feature")
+    direction: str = Field(description="'toward attack' or 'toward clean'")
+
+
 class ScoreResponse(BaseModel):
     probability: float = Field(description="P(attack) from the trained RandomForest, in [0, 1]")
     severity: float = Field(description="Probability normalized against the model's own held-out floor/ceiling (same methodology as spatial_layer_notes.md), in [0, 1]")
@@ -56,6 +63,13 @@ class ScoreResponse(BaseModel):
     event_id: Optional[int] = Field(default=None, description="Row id in the persisted scored_events table")
     tower: Optional[dict] = Field(default=None, description="The real tower this event was attributed to, if any")
     correlation: Optional[dict] = Field(default=None, description="Live distance-weighted correlation against real neighboring towers -- see api/spatial.py")
+    top_features: list[TopFeature] = Field(default_factory=list, description="Top SHAP-ranked features for this prediction -- see SHAP_EXPLAINABILITY.md. Always computed for /score.")
+
+
+class ExplainResponse(BaseModel):
+    event_id: int
+    top_features: list[TopFeature]
+    cached: bool = Field(description="True if this explanation was already stored (e.g. computed live during replay, or a prior on-demand call); False if it was just computed by this request")
 
 
 class HealthResponse(BaseModel):

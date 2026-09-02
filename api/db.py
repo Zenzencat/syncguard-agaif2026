@@ -36,6 +36,16 @@ CREATE INDEX IF NOT EXISTS idx_scored_events_created_at ON scored_events(created
 CREATE INDEX IF NOT EXISTS idx_scored_events_tower ON scored_events(tower_site_id, created_at);
 """
 
+# Added after the initial schema above (SHAP explainability -- see SHAP_EXPLAINABILITY.md).
+# NULL means "not explained yet" (e.g. scored during a fast replay, above the speed
+# threshold where live SHAP is skipped -- see api/replay.py) -- distinct from an empty list,
+# which json.dumps([]) would produce and this code never actually stores, since explain()
+# always returns at least one feature. Applied via idempotent ALTER TABLE in
+# EventStore.__init__ so existing local DBs from before this change don't break.
+_MIGRATIONS = [
+    "ALTER TABLE scored_events ADD COLUMN top_features_json TEXT",
+]
+
 
 class EventStore:
     def __init__(self, db_path: Path | None = None):
@@ -47,7 +57,20 @@ class EventStore:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            for stmt in _MIGRATIONS:
+                try:
+                    self._conn.execute(stmt)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" not in str(e):
+                        raise  # a real migration failure, not just "already applied"
             self._conn.commit()
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        raw = d.pop("top_features_json", None)
+        d["top_features"] = json.loads(raw) if raw is not None else None
+        return d
 
     def insert_event(self, event: dict) -> int:
         with self._lock:
@@ -56,8 +79,8 @@ class EventStore:
                    (created_at, source, run_id, scenario_id, attack_type, true_attack,
                     probability, severity, predicted_label, model_version,
                     tower_site_id, tower_site_name, tower_lat, tower_lon,
-                    correlation_score, features_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    correlation_score, features_json, top_features_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     event.get("created_at") or datetime.now(timezone.utc).isoformat(),
                     event["source"],
@@ -75,17 +98,35 @@ class EventStore:
                     event.get("tower_lon"),
                     event.get("correlation_score"),
                     json.dumps(event.get("features")) if event.get("features") is not None else None,
+                    json.dumps(event.get("top_features")) if event.get("top_features") is not None else None,
                 ),
             )
             self._conn.commit()
             return cur.lastrowid
+
+    def get_event(self, event_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM scored_events WHERE id = ?", (event_id,)
+            ).fetchone()
+        return self._row_to_dict(row) if row else None
+
+    def update_event_top_features(self, event_id: int, top_features: list[dict]) -> None:
+        """Persists a lazily-computed (on-demand) explanation back onto its event, so
+        requesting it again doesn't recompute -- see GET /events/{id}/explain."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE scored_events SET top_features_json = ? WHERE id = ?",
+                (json.dumps(top_features), event_id),
+            )
+            self._conn.commit()
 
     def recent_events(self, limit: int = 500) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM scored_events ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [self._row_to_dict(r) for r in rows]
 
     def events_for_tower_since(self, tower_site_id: str, since_iso: str) -> list[dict]:
         with self._lock:
@@ -115,7 +156,7 @@ class EventStore:
                          WHERE tower_site_id IS NOT NULL GROUP BY tower_site_id) latest
                    ON s.tower_site_id = latest.tower_site_id AND s.id = latest.max_id"""
             ).fetchall()
-        return {r["tower_site_id"]: dict(r) for r in rows}
+        return {r["tower_site_id"]: self._row_to_dict(r) for r in rows}
 
     def event_count(self) -> int:
         with self._lock:

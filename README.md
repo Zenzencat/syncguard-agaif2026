@@ -32,6 +32,7 @@ Full background, methodology, and honest limitations are in [`project_abstract.m
 | `ROBUSTNESS_NOTES.md` | The trade-off discussion behind `train_improved_model.py`, including two fixes that were tried and rejected on evidence (not just theory) before landing on what shipped. |
 | `api/` | FastAPI serving layer: `/score`, `/health`, simulated live replay (`/replay/*`, SSE `/stream/events`), real distance-weighted spatial correlation (`api/spatial.py`), global/local Moran's I spatial statistics (`api/spatial_stats.py`), and SQLite persistence (`api/db.py`). See "Serving layer" below. |
 | `SPATIAL_STATISTICS.md` | Global Moran's I / Local Moran's I (LISA) method, weights choice, and worked examples from a real replay — the established-GeoAI layer alongside the hand-rolled correlation. |
+| `SHAP_EXPLAINABILITY.md` | Per-prediction SHAP explainability method, the speed/live-vs-on-demand design tradeoff, and a per-event sanity check against the baseline report's global feature importances (including a genuine nuance found, not just confirmed). |
 | `Makefile`, `Dockerfile`, `docker-compose.yml` | One-command setup/train/serve, and containerization — see "Serving layer" and "Containerization" below. |
 | `requirements-api.txt` | FastAPI/uvicorn/pydantic — kept separate from `requirements.txt` (the original detector's pinned deps) rather than merged into it. |
 
@@ -165,14 +166,25 @@ docstring for the exact split, summarized here:
   now" (global Moran's I, with a permutation p-value), plus a per-tower classification into
   High-High hotspots, Low-Low coldspots, and spatial outliers (LISA). Full method, weights
   choice, and real worked examples in [`SPATIAL_STATISTICS.md`](SPATIAL_STATISTICS.md).
+- **Per-prediction explainability — SHAP** (`api/model_service.py`, `POST /score`,
+  `GET /events/{id}/explain`) — exact Tree SHAP over the shipped RandomForest, top 5 features
+  by contribution for any individual prediction, not just the model's global feature
+  importances. `POST /score` always computes it; replay computes it live only up to
+  `speed<=20` (above that it would throttle replay to ~20 rows/sec) and explains any
+  skipped event lazily on demand instead — full method, the speed/design tradeoff, and real
+  worked examples (including a genuinely ambiguous near-threshold case) in
+  [`SHAP_EXPLAINABILITY.md`](SHAP_EXPLAINABILITY.md).
 - **SQLite persistence** (`api/db.py`) — every scored event (from `/score` or replay) is
   written to `data/syncguard.db` (`scored_events` table), including ground-truth labels for
-  replayed rows (for demo purposes — a real `/score` call has no ground truth).
+  replayed rows (for demo purposes — a real `/score` call has no ground truth) and, once
+  computed, its SHAP top-features explanation.
 - **Dashboard**: `GET /dashboard` serves `syncguard_interactive_summary.html`, which now has a
   live-replay section (top of the page) that talks to this API — connects, lets you pick a
   scenario and speed, and renders the live tower map + event log via SSE, with Global Moran's
   I/p-value headline stats and LISA cluster/outlier rings on the map, refreshed every few
-  seconds. Everything below that section is unchanged and still fully static/offline.
+  seconds, plus a click-to-explain panel (event log row or map marker) showing why that
+  prediction was made. Everything below that section is unchanged and still fully
+  static/offline.
 
 ```bash
 make setup           # pip install -r requirements.txt -r requirements-api.txt

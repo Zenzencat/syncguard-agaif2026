@@ -22,6 +22,19 @@ DEFAULT_SCENARIO = {"attack_type": "Spoofing", "scenario_id": "2.1.1"}  # same s
 MIN_SLEEP_S = 0.02
 MAX_ROW_GAP_S = 5.0  # clamp real inter-row gaps (e.g. across a data dropout) so replay doesn't stall
 
+# SHAP TreeExplainer costs ~45-55ms/row (exact Tree SHAP over 300 trees, confirmed -- no
+# faster mode without sacrificing exactness, see SHAP_EXPLAINABILITY.md) -- computing it
+# inline on every replayed row would throttle replay to ~20 rows/sec regardless of the
+# requested speed multiplier. LIVE_EXPLAIN_MAX_SPEED is the speed threshold below which
+# that cost is absorbed into the replay's own natural per-row cadence anyway (at speed=20,
+# the ~1Hz dataset's per-row gap is already ~50ms -- almost exactly the SHAP cost -- so
+# inline explanation is nearly free there) and above which it's skipped so replay stays at
+# full requested speed. Skipped rows are not permanently unexplainable: GET
+# /events/{id}/explain computes SHAP on-demand from the event's own stored feature values,
+# lazily, the first time anyone actually asks -- see SHAP_EXPLAINABILITY.md's full writeup
+# of this tradeoff.
+LIVE_EXPLAIN_MAX_SPEED = 20.0
+
 
 @functools.lru_cache(maxsize=1)
 def _load_dataset() -> pd.DataFrame:
@@ -91,6 +104,7 @@ class ReplayManager:
         self._rows_replayed = 0
         self._total_rows = 0
         self._error: str | None = None
+        self._live_explain = True
 
     @property
     def status(self) -> dict:
@@ -101,6 +115,7 @@ class ReplayManager:
             "rows_replayed": self._rows_replayed,
             "total_rows": self._total_rows,
             "error": self._error,
+            "live_explain": self._live_explain,
         }
 
     def start(self, run_id: str | None, speed: float):
@@ -110,6 +125,7 @@ class ReplayManager:
         self._run_id, self._speed = resolved_run_id, max(speed, 0.1)
         self._rows_replayed = 0
         self._error = None
+        self._live_explain = self._speed <= LIVE_EXPLAIN_MAX_SPEED
         self._status = "running"
         self._task = asyncio.create_task(self._run(resolved_run_id, self._speed))
         return self.status
@@ -130,6 +146,7 @@ class ReplayManager:
                 features = {c: (None if pd.isna(row[c]) else float(row[c]))
                             for c in self._model.feature_cols}
                 result = self._model.score(features)
+                top_features = self._model.explain(features) if self._live_explain else None
 
                 tower = self._attributor.next_tower()
                 corr = self._correlation.correlate(tower["site_id"])
@@ -152,6 +169,7 @@ class ReplayManager:
                     "tower_lon": tower["lon"],
                     "correlation_score": corr.correlation_score,
                     "features": features,
+                    "top_features": top_features,
                 })
 
                 self._bus.publish({
@@ -164,6 +182,7 @@ class ReplayManager:
                     **result,
                     "tower": tower,
                     "correlation_score": corr.correlation_score,
+                    "top_features": top_features,
                 })
 
                 self._rows_replayed += 1

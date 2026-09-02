@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 
-from api.schemas import TelemetryInput, ScoreResponse, HealthResponse, AutocorrelationResponse
+from api.schemas import TelemetryInput, ScoreResponse, HealthResponse, AutocorrelationResponse, ExplainResponse
 from api.model_service import ModelService, ModelNotFoundError
 from api.db import EventStore
 from api.spatial import load_towers, TowerAttributor, LiveCorrelationEngine
@@ -89,6 +89,7 @@ async def score(telemetry: TelemetryInput):
     ms = _require_model(app)
     features = telemetry.model_dump(exclude={"receiver_id", "tower_site_id"})
     result = ms.score(features)
+    top_features = ms.explain(features)  # always computed for /score -- ad-hoc, single-row, latency is imperceptible (see SHAP_EXPLAINABILITY.md)
 
     tower, corr = None, None
     if telemetry.tower_site_id is not None:
@@ -124,9 +125,10 @@ async def score(telemetry: TelemetryInput):
         "tower_lon": tower["lon"] if tower else None,
         "correlation_score": corr["correlation_score"] if corr else None,
         "features": features,
+        "top_features": top_features,
     })
 
-    return ScoreResponse(**result, event_id=event_id, tower=tower, correlation=corr)
+    return ScoreResponse(**result, event_id=event_id, tower=tower, correlation=corr, top_features=top_features)
 
 
 @app.get("/towers")
@@ -143,6 +145,31 @@ async def events(limit: int = Query(default=200, le=2000)):
 async def events_map():
     """Latest scored event per tower -- what the dashboard renders as the current map state."""
     return list(app.state.event_store.latest_severity_per_tower().values())
+
+
+@app.get("/events/{event_id}/explain", response_model=ExplainResponse)
+async def explain_event(event_id: int):
+    """On-demand SHAP explanation for an already-scored event. If it already has one
+    (computed live for /score or a slow-enough replay -- see api/replay.py's
+    LIVE_EXPLAIN_MAX_SPEED), returns it as-is (cached=True), no recomputation. Otherwise
+    recomputes it from the event's own stored feature values and persists the result back
+    onto the row, so asking again doesn't recompute. This is what makes fast-replay events
+    lazily, not permanently, unexplainable -- see SHAP_EXPLAINABILITY.md."""
+    ms = _require_model(app)
+    event = app.state.event_store.get_event(event_id)
+    if event is None:
+        raise HTTPException(404, f"No scored event with id={event_id}")
+
+    if event.get("top_features") is not None:
+        return ExplainResponse(event_id=event_id, top_features=event["top_features"], cached=True)
+
+    if not event.get("features_json"):
+        raise HTTPException(422, f"Event {event_id} has no stored feature values to explain "
+                                  f"(scored before this endpoint existed).")
+    features = json.loads(event["features_json"])
+    top_features = ms.explain(features)
+    app.state.event_store.update_event_top_features(event_id, top_features)
+    return ExplainResponse(event_id=event_id, top_features=top_features, cached=False)
 
 
 @app.get("/spatial/autocorrelation", response_model=AutocorrelationResponse)

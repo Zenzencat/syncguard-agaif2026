@@ -10,3 +10,9 @@ pydantic==2.10.4
 # weights are built from a plain lat/lon array. See SPATIAL_STATISTICS.md.
 libpysal==4.15.0
 esda==2.10.0
+
+# Per-prediction explainability (api/model_service.py): SHAP TreeExplainer over the shipped
+# RandomForest. Exact algorithm, no sampling/seed needed -- confirmed bit-identical across
+# repeated calls. See SHAP_EXPLAINABILITY.md for the ~45-55ms/row cost this carries and the
+# speed-gated replay / on-demand-explain design that works around it.
+shap==0.52.0
