@@ -64,3 +64,31 @@ class HealthResponse(BaseModel):
     model_version: Optional[str] = None
     towers_loaded: int = 0
     replay_running: bool = False
+
+
+class LisaTower(BaseModel):
+    tower_key: str
+    site_id: str
+    site_name: str
+    lat: float
+    lon: float
+    severity: float = Field(description="Real predict_proba-derived severity, most recent scored event for this tower")
+    local_moran_i: float
+    p_value: float = Field(description="Permutation-based pseudo p-value (999 permutations, seeded)")
+    significant: bool = Field(description="p_value < 0.05")
+    lisa_quadrant: int = Field(description="0=not significant, 1=High-High hotspot, 2=Low-High outlier, 3=Low-Low coldspot, 4=High-Low outlier")
+    lisa_label: str
+
+
+class AutocorrelationResponse(BaseModel):
+    computable: bool = Field(description="False if fewer than min_required towers have a scored event yet, or severities have zero variance")
+    n_towers_scored: int
+    n_towers_total: int
+    min_required: int
+    k_neighbors: Optional[int] = Field(default=None, description="k used for the k-nearest-neighbors spatial weights, see SPATIAL_STATISTICS.md")
+    global_moran_i: Optional[float] = Field(default=None, description="Global Moran's I -- positive/near +1 = clustered, near 0 = random, negative = dispersed")
+    global_p_value: Optional[float] = None
+    global_z_score: Optional[float] = None
+    global_expected_i: Optional[float] = Field(default=None, description="Expected I under spatial randomness, ~ -1/(n-1)")
+    reason: Optional[str] = Field(default=None, description="Why computable is False, if it is")
+    per_tower: list[LisaTower] = Field(default_factory=list, description="Local Moran's I (LISA) classification per scored tower")

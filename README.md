@@ -30,7 +30,8 @@ Full background, methodology, and honest limitations are in [`project_abstract.m
 | `train_improved_model.py` | Robustness pass: threshold tuning to raise clean-class recall without materially costing jamming recall, selected via cross-validation rather than a single validation recording. Writes `improved_model_report.md`. Does not modify the baseline model/script. |
 | `improved_model_report.md` | Results of the improved model, directly comparable to `baseline_model_report.md` on the identical held-out set. |
 | `ROBUSTNESS_NOTES.md` | The trade-off discussion behind `train_improved_model.py`, including two fixes that were tried and rejected on evidence (not just theory) before landing on what shipped. |
-| `api/` | FastAPI serving layer: `/score`, `/health`, simulated live replay (`/replay/*`, SSE `/stream/events`), real distance-weighted spatial correlation (`api/spatial.py`), and SQLite persistence (`api/db.py`). See "Serving layer" below. |
+| `api/` | FastAPI serving layer: `/score`, `/health`, simulated live replay (`/replay/*`, SSE `/stream/events`), real distance-weighted spatial correlation (`api/spatial.py`), global/local Moran's I spatial statistics (`api/spatial_stats.py`), and SQLite persistence (`api/db.py`). See "Serving layer" below. |
+| `SPATIAL_STATISTICS.md` | Global Moran's I / Local Moran's I (LISA) method, weights choice, and worked examples from a real replay — the established-GeoAI layer alongside the hand-rolled correlation. |
 | `Makefile`, `Dockerfile`, `docker-compose.yml` | One-command setup/train/serve, and containerization — see "Serving layer" and "Containerization" below. |
 | `requirements-api.txt` | FastAPI/uvicorn/pydantic — kept separate from `requirements.txt` (the original detector's pinned deps) rather than merged into it. |
 
@@ -157,13 +158,21 @@ docstring for the exact split, summarized here:
   a given replayed event is attributed to (deterministic round-robin over the 136 real sites,
   since the underlying dataset is a single receiver with no real per-tower mapping to use) —
   every API response and DB row makes this explicit.
+- **Spatial statistics — global Moran's I & Local Moran's I / LISA** (`api/spatial_stats.py`,
+  `GET /spatial/autocorrelation`) — an established GeoAI method (PySAL's `esda`/`libpysal`,
+  not a custom metric) layered on top of, and additive to, the hand-rolled correlation above:
+  one number answering "is the network's current anomaly pattern spatially clustered right
+  now" (global Moran's I, with a permutation p-value), plus a per-tower classification into
+  High-High hotspots, Low-Low coldspots, and spatial outliers (LISA). Full method, weights
+  choice, and real worked examples in [`SPATIAL_STATISTICS.md`](SPATIAL_STATISTICS.md).
 - **SQLite persistence** (`api/db.py`) — every scored event (from `/score` or replay) is
   written to `data/syncguard.db` (`scored_events` table), including ground-truth labels for
   replayed rows (for demo purposes — a real `/score` call has no ground truth).
 - **Dashboard**: `GET /dashboard` serves `syncguard_interactive_summary.html`, which now has a
   live-replay section (top of the page) that talks to this API — connects, lets you pick a
-  scenario and speed, and renders the live tower map + event log via SSE. Everything below
-  that section is unchanged and still fully static/offline.
+  scenario and speed, and renders the live tower map + event log via SSE, with Global Moran's
+  I/p-value headline stats and LISA cluster/outlier rings on the map, refreshed every few
+  seconds. Everything below that section is unchanged and still fully static/offline.
 
 ```bash
 make setup           # pip install -r requirements.txt -r requirements-api.txt

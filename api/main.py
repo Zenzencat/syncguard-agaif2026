@@ -15,10 +15,11 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 
-from api.schemas import TelemetryInput, ScoreResponse, HealthResponse
+from api.schemas import TelemetryInput, ScoreResponse, HealthResponse, AutocorrelationResponse
 from api.model_service import ModelService, ModelNotFoundError
 from api.db import EventStore
 from api.spatial import load_towers, TowerAttributor, LiveCorrelationEngine
+from api.spatial_stats import compute_autocorrelation
 from api.replay import ReplayManager, EventBus, list_run_ids
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -142,6 +143,18 @@ async def events(limit: int = Query(default=200, le=2000)):
 async def events_map():
     """Latest scored event per tower -- what the dashboard renders as the current map state."""
     return list(app.state.event_store.latest_severity_per_tower().values())
+
+
+@app.get("/spatial/autocorrelation", response_model=AutocorrelationResponse)
+async def spatial_autocorrelation():
+    """Global Moran's I + per-tower Local Moran's I (LISA), computed fresh from the current
+    scored_events state -- see api/spatial_stats.py for the full REAL/SIMULATED framing and
+    SPATIAL_STATISTICS.md for the method writeup. Distinct from, and additive to, the
+    hand-rolled live correlation in api/spatial.py and the offline SIMULATED-epicenter layer
+    in build_spatial_simulation.py -- neither of those is touched by this endpoint."""
+    latest = app.state.event_store.latest_severity_per_tower()
+    result = compute_autocorrelation(app.state.towers, latest)
+    return AutocorrelationResponse(**result.__dict__)
 
 
 @app.get("/replay/runs")

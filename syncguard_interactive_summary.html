@@ -110,6 +110,19 @@
   #live-log .row.attack{color:#ff8080;}
   #live-log .row.clean{color:var(--real);}
   #live-log .head{color:var(--muted); font-weight:700; text-transform:uppercase; font-size:10.5px;}
+
+  /* ---- Spatial statistics (Moran's I / LISA) ---- */
+  .moran-row{display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin:2px 0 14px;}
+  .moran-stat{
+    display:flex; align-items:baseline; gap:8px; background:#0d1622; border:1px solid var(--panel-border);
+    border-radius:8px; padding:9px 16px;
+  }
+  .moran-stat .v{font-size:19px; font-weight:800; color:#4da3ff;}
+  .moran-stat .l{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em;}
+  .lisa-legend{display:flex; gap:12px; flex-wrap:wrap; font-size:11.5px; color:var(--muted);}
+  .lisa-legend span{display:inline-flex; align-items:center; gap:5px;}
+  .lisa-legend .ring{width:11px; height:11px; border-radius:50%; border:2.5px solid; display:inline-block;}
+  .ring.hh{border-color:#ff3b3b;} .ring.ll{border-color:#4da3ff;} .ring.outlier{border-color:#b56bff;}
 </style>
 </head>
 <body>
@@ -153,9 +166,22 @@
       <div class="counter"><span id="replay-count">0</span> events scored this session</div>
     </div>
 
+    <h3>Spatial statistics — global Moran's I &amp; Local Moran's I (LISA)</h3>
+    <p class="note">Established spatial-statistics methods (Moran, 1950; Anselin, 1995), via PySAL's <code>esda</code>/<code>libpysal</code> — not a custom metric. <strong>Real</strong>: the k-nearest-neighbor spatial weights (built from real tower geography) and the severities fed in (real <code>predict_proba</code> output). <strong>Inherited caveat</strong>: which tower each severity is attributed to is still the SIMULATED round-robin above — the statistics themselves are 100% real math applied to that input. Computed fresh from current network state, refreshed every few seconds while connected. Full methodology: <code>SPATIAL_STATISTICS.md</code>.</p>
+    <div class="moran-row">
+      <div class="moran-stat"><span class="v" id="moran-i">—</span><span class="l">Global Moran's I</span></div>
+      <div class="moran-stat"><span class="v" id="moran-p">—</span><span class="l">p-value (999 perms)</span></div>
+      <div class="moran-stat"><span class="v" id="moran-n">—</span><span class="l">towers scored / min needed</span></div>
+      <div class="lisa-legend">
+        <span><i class="ring hh"></i>High-High hotspot</span>
+        <span><i class="ring ll"></i>Low-Low coldspot</span>
+        <span><i class="ring outlier"></i>Spatial outlier (High-Low / Low-High)</span>
+      </div>
+    </div>
+
     <div class="grid2">
       <div>
-        <h3>Live tower map (color = live severity, most recent event per tower)</h3>
+        <h3>Live tower map (fill = live severity; ring = significant LISA cluster/outlier)</h3>
         <div id="live-map" style="width:100%;height:420px;"></div>
       </div>
       <div>
@@ -361,8 +387,12 @@ Plotly.newPlot('fi-chart', [{
 
   let eventSource = null;
   let sessionCount = 0;
+  let moranTimer = null;
   const liveSeverity = new Map(); // site_id -> {lat, lon, name, severity, correlation}
+  const lisaByTower = new Map();  // site_id -> {quadrant, label, p_value, significant}
   let allTowers = [];
+  const moranIEl = $('moran-i'), moranPEl = $('moran-p'), moranNEl = $('moran-n');
+  const LISA_RING_COLOR = {1:'#ff3b3b', 2:'#b56bff', 3:'#4da3ff', 4:'#b56bff'}; // HH,LH,LL,HL
 
   function base(){ return apiBaseInput.value.replace(/\/$/, ''); }
   function setStatus(kind, text){
@@ -388,7 +418,23 @@ Plotly.newPlot('fi-chart', [{
       hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#1f5f8f', font:{color:'#EAF1F7', size:12}},
       showlegend:false,
     };
-    const traces = base ? [base, activeTrace] : [activeTrace];
+    const lisaSig = active.filter(t => lisaByTower.has(t.site_id) && lisaByTower.get(t.site_id).significant);
+    const lisaTrace = lisaSig.length ? {
+      type:'scattergl', mode:'markers', x: lisaSig.map(t=>t.lon), y: lisaSig.map(t=>t.lat),
+      marker:{
+        symbol:'circle-open', size: lisaSig.map(t=>16+22*t.severity),
+        color: lisaSig.map(t => LISA_RING_COLOR[lisaByTower.get(t.site_id).quadrant] || '#888'),
+        line:{width:3},
+      },
+      text: lisaSig.map(t => {
+        const l = lisaByTower.get(t.site_id);
+        return `<b>${t.site_id}</b> — ${l.label}<br>Local Moran's I p-value: ${l.p_value.toFixed(3)} (significant)<br>` +
+               `Real k-NN spatial weights + real severity; see SPATIAL_STATISTICS.md`;
+      }),
+      hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#b56bff', font:{color:'#EAF1F7', size:12}},
+      showlegend:false,
+    } : null;
+    const traces = [base, activeTrace, lisaTrace].filter(Boolean);
     const liveLayout = {
       paper_bgcolor:'#0A121C', plot_bgcolor:'#0A121C', font:{color:'#EAF1F7'},
       margin:{l:50,r:20,t:10,b:40},
@@ -407,6 +453,25 @@ Plotly.newPlot('fi-chart', [{
                      `<div>${ev.severity.toFixed(3)}</div><div>${ev.correlation_score.toFixed(3)}</div>`;
     logEl.insertBefore(row, logEl.children[1] || null);
     while (logEl.children.length > 60) logEl.removeChild(logEl.lastChild);
+  }
+
+  async function fetchAutocorrelation(){
+    try{
+      const d = await fetch(base() + '/spatial/autocorrelation').then(r => r.json());
+      lisaByTower.clear();
+      if(d.computable){
+        moranIEl.textContent = d.global_moran_i.toFixed(3);
+        moranPEl.textContent = d.global_p_value.toFixed(3) + (d.global_p_value < 0.05 ? ' *' : '');
+        d.per_tower.forEach(t => lisaByTower.set(t.tower_key, {
+          quadrant: t.lisa_quadrant, label: t.lisa_label, p_value: t.p_value, significant: t.significant,
+        }));
+      } else {
+        moranIEl.textContent = '—';
+        moranPEl.textContent = '—';
+      }
+      moranNEl.textContent = `${d.n_towers_scored}/${d.min_required}`;
+      renderLiveMap();
+    }catch(err){ /* transient poll failure -- leave last-known values on screen */ }
   }
 
   async function connect(){
@@ -435,6 +500,10 @@ Plotly.newPlot('fi-chart', [{
       }));
       renderLiveMap();
       openStream();
+
+      if(moranTimer) clearInterval(moranTimer);
+      fetchAutocorrelation();
+      moranTimer = setInterval(fetchAutocorrelation, 3000);
     }catch(err){
       setStatus('bad', 'not connected (' + err.message + ')');
       btnStart.disabled = true;

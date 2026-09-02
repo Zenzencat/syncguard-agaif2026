@@ -1,3 +1,12 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
+
+# Spatial statistics (api/spatial_stats.py): global Moran's I + Local Moran's I (LISA).
+# Pulls in geopandas/shapely transitively (libpysal's own dependency), but confirmed
+# installable via prebuilt wheels -- no GDAL/C-toolchain build step, no compilation -- on
+# both this Windows dev machine and the Dockerfile's python:3.12-slim (Linux) base (real
+# `docker compose build`, not assumed). This code path doesn't use geopandas directly --
+# weights are built from a plain lat/lon array. See SPATIAL_STATISTICS.md.
+libpysal==4.15.0
+esda==2.10.0
