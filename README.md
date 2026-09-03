@@ -1,269 +1,298 @@
 # SyncGuard
 
+**GNSS spoofing / jamming / meaconing detection for telecom base-station timing infrastructure.**
+
 *AGAIF 2026 Hackathon — Cybersecurity Track — Team Lorem Ipsum (HACK_TH_014, Thailand)*
 
-SyncGuard is a lightweight, per-site anomaly-detection layer that monitors a base station's
-GNSS receiver observables — signal quality, Doppler behaviour, RF interference indicators, and
-solution-quality metrics — and flags jamming, spoofing, or meaconing in near real time, without
-requiring any change to the GNSS-disciplined oscillator (GNSSDO) hardware itself. Most
-currently-deployed base-station GNSS receivers don't support cryptographic signal
-authentication (e.g. Galileo OSNMA), so SyncGuard takes a retrofit-first approach: detecting
-the statistical signature of an attack from receiver observables already available on
-off-the-shelf GNSS modules in the field, rather than requiring a hardware/firmware upgrade.
-Full background, methodology, and honest limitations are in [`project_abstract.md`](project_abstract.md).
+4G/5G base stations depend on GNSS-disciplined oscillators (GNSSDOs) for the phase/frequency
+sync that TDD, inter-cell coordination, and handover require. GNSS spoofing feeds a receiver a
+false time and silently degrades the network — frame misalignment, inter-cell interference,
+handover failures — with no hard-outage trigger to diagnose. SyncGuard is a per-site detector
+that flags the *statistical signature* of an attack from receiver observables already exposed by
+off-the-shelf GNSS modules (signal quality, Doppler behaviour, RF-interference indicators,
+solution-quality metrics) — a **retrofit-first** approach that needs no cryptographic signal
+authentication and no GNSSDO hardware change.
 
-## Repository contents
+Full problem framing, methodology, impact, and AI-usage disclosure: [`project_abstract.md`](project_abstract.md).
 
-| File | What it is |
-|---|---|
-| `extract_features.py` | Feature extraction: raw Jammertest 2024 scenario logs → time-series features (C/N0, Doppler, code-Doppler pseudorange residual, RF jamming indicators, receiver solution quality). |
-| `sanity_check.py` | Stats/sample-row dump + the clean-vs-spoofed sanity plot. |
-| `train_baseline_model.py` | Trains and evaluates the baseline RandomForest classifier; writes `baseline_model_report.md` and a results plot. |
-| `dataset_notes.md` | Full dataset provenance, why the original FGI-JSDR/MATLAB plan was dropped, feature definitions, and known data quirks. |
-| `baseline_model_report.md` | Model results: precision/recall/F1 per class, confusion matrix, ROC/PR-AUC, per-attack-type recall, feature importances. |
-| `project_abstract.md` | The full AGAIF submission abstract (problem, solution, methodology, results, impact, AI usage disclosure). |
-| `plots/` | `scenario_2.1.1_clean_vs_spoofed.png` (sanity-check plot) and `baseline_model_results.png` (confusion matrix + feature importances). |
-| `build_spatial_simulation.py` | Adds a spatial layer on top of the (unmodified) detector above: real Telkomsel tower locations + a SIMULATED severity/spread overlay. Writes `spatial_processed/`. |
-| `spatial_layer_notes.md` | Full methodology for the spatial layer, and the exact REAL/SIMULATED split — read this before the spatial outputs below. |
-| `spatial_processed/` | Spatial layer outputs: `simulated_spatial_anomaly_SIMULATED.csv` (per-tower severity/rank), `spatial_anomaly_map_SIMULATED.png`, `spatial_anomaly_spread_over_time_SIMULATED.png`. |
-| `syncguard_interactive_summary.html` | Interactive companion (Plotly map + time-step spread control + detector evidence panel), served at `/dashboard` by the API, or still openable directly in a browser. The detector-evidence and offline-map sections work fully offline as before; a new live-replay section (top of the page) additionally polls the API when it's running — see "Serving layer" below. |
-| `train_improved_model.py` | Robustness pass: threshold tuning to raise clean-class recall without materially costing jamming recall, selected via cross-validation rather than a single validation recording. Writes `improved_model_report.md`. Does not modify the baseline model/script. |
-| `improved_model_report.md` | Results of the improved model, directly comparable to `baseline_model_report.md` on the identical held-out set. |
-| `ROBUSTNESS_NOTES.md` | The trade-off discussion behind `train_improved_model.py`, including two fixes that were tried and rejected on evidence (not just theory) before landing on what shipped. |
-| `api/` | FastAPI serving layer: `/score`, `/health`, simulated live replay (`/replay/*`, SSE `/stream/events`), real distance-weighted spatial correlation (`api/spatial.py`), global/local Moran's I spatial statistics (`api/spatial_stats.py`), and SQLite persistence (`api/db.py`). See "Serving layer" below. |
-| `SPATIAL_STATISTICS.md` | Global Moran's I / Local Moran's I (LISA) method, weights choice, and worked examples from a real replay — the established-GeoAI layer alongside the hand-rolled correlation. |
-| `SHAP_EXPLAINABILITY.md` | Per-prediction SHAP explainability method, the speed/live-vs-on-demand design tradeoff, and a per-event sanity check against the baseline report's global feature importances (including a genuine nuance found, not just confirmed). |
-| `OPERATIONAL_METRICS.md` | Measured scoring latency, replay throughput, concurrent-request behavior during replay, and the alert-hysteresis design/verification — real benchmarks, including two corrections to earlier unmeasured assumptions in this repo's own docs. |
-| `Makefile`, `Dockerfile`, `docker-compose.yml` | One-command setup/train/serve, and containerization — see "Serving layer" and "Containerization" below. |
-| `requirements-api.txt` | FastAPI/uvicorn/pydantic — kept separate from `requirements.txt` (the original detector's pinned deps) rather than merged into it. |
+---
 
-**Not included in this repo**: the raw dataset (~375MB compressed, ~1.4GB extracted) and most
-of the `processed/`/`spatial_raw/` directories it produces (plots, the full feature CSV, the
-bootcamp tower-data zip) — excluded for size and regenerated by running the scripts below.
-The two exceptions, committed so the API works out of the box without requiring the raw
-dataset: `processed/syncguard_features.parquet` (~5MB) and the real Telkomsel tower CSV at
-`spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv`. See "Setup" for where
-to get the raw data if you want to regenerate everything from scratch.
+## What the system does
 
-## Prerequisites
+Not just a model — a running service with an evidence trail:
 
-- Python 3.12 (developed and tested on 3.12.10)
-- Dependencies pinned in [`requirements.txt`](requirements.txt) (numpy, pandas, matplotlib,
-  pyarrow, scikit-learn, and their transitive dependencies) for the detector/dataset
-  pipeline, plus [`requirements-api.txt`](requirements-api.txt) (fastapi, uvicorn, pydantic)
-  if you're running the serving layer -- `make setup` installs both.
-- No MATLAB, no GPU, no proprietary SDR toolchain required — this pipeline was deliberately
-  built to avoid FGI-GSRx/MATLAB (see `dataset_notes.md` for why) in favour of a dataset that
-  ships pre-processed observables directly.
-- Docker + Docker Compose only if you want the one-command containerized path instead of a
-  local venv — see "Containerization" below.
+| Capability | Where | Notes |
+|---|---|---|
+| **Trained detector** | `train_baseline_model.py`, `train_improved_model.py` | 23-feature RandomForest, attack-vs-clean per ~1 Hz epoch. Split by recording, decision threshold tuned by GroupKFold CV. Real metrics + honest limitations in [`baseline_model_report.md`](baseline_model_report.md) / [`improved_model_report.md`](improved_model_report.md). |
+| **FastAPI serving layer** | `api/main.py` | `POST /score` returns probability + severity + SHAP explanation for one telemetry reading. `GET /health`. Sub-100 ms p50 end-to-end over HTTP (measured — [`OPERATIONAL_METRICS.md`](OPERATIONAL_METRICS.md)). |
+| **Streaming replay** | `api/replay.py`, `GET /stream/events` (SSE) | Replays a recording row-by-row in real recording-time order through the same scoring path, as an asyncio task in-process — no Kafka, no broker. Drives the live demo. |
+| **Per-prediction explainability (SHAP)** | `api/model_service.py`, `GET /events/{id}/explain` | Exact Tree SHAP over the shipped forest, top-5 features by signed contribution. Always computed for `/score`; speed-gated during replay with lazy on-demand fallback. [`SHAP_EXPLAINABILITY.md`](SHAP_EXPLAINABILITY.md). |
+| **Real spatial statistics** | `api/spatial_stats.py`, `GET /spatial/autocorrelation` | Global Moran's I + Local Moran's I (LISA) via PySAL (`esda`/`libpysal`) over the live tower network — "is the anomaly pattern spatially clustered right now" + per-tower hotspot/outlier classification. [`SPATIAL_STATISTICS.md`](SPATIAL_STATISTICS.md). |
+| **Live distance-weighted correlation** | `api/spatial.py` | Per-event: haversine-distance-weighted aggregate of *other real towers'* recent scored severities in a real time window. |
+| **Alert hysteresis** | `api/hysteresis.py` | A tower shows `alerting` only after 3 consecutive above-threshold readings, clears after 5 below — debounced over the recording's real temporal order so one flicker never spams. [`OPERATIONAL_METRICS.md`](OPERATIONAL_METRICS.md) §4. |
+| **SQLite persistence** | `api/db.py` | Every scored event (from `/score` or replay) → `data/syncguard.db`, with features, SHAP explanation, and debounced `alert_state`. |
+| **Live dashboard** | `syncguard_interactive_summary.html`, `GET /dashboard` | Tower map + event log via SSE, Global Moran's I / p-value headline, LISA cluster rings, hysteresis alert diamonds, click-any-event-to-explain panel. The lower sections work fully offline. |
+| **Docker deployment** | `Dockerfile`, `docker-compose.yml` | One command; trains the model at image-build time from the committed feature table; SQLite on a named volume. |
 
-## Setup
+### API endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Model-loaded status, tower count, replay-running flag |
+| `POST` | `/score` | Score one telemetry reading → probability, severity, label, SHAP top-features; optional live spatial correlation if `tower_site_id` supplied |
+| `GET` | `/events/{id}/explain` | On-demand SHAP for an already-scored event (cached after first call) |
+| `GET` | `/towers` | The 136 real tower rows |
+| `GET` | `/events?limit=` | Recent scored events |
+| `GET` | `/events/map` | Latest event per tower — current map state, with `alert_state` |
+| `GET` | `/spatial/autocorrelation` | Global Moran's I + z/p-value + per-tower LISA table, computed fresh from current state |
+| `GET` | `/replay/runs` | The 24 replayable recordings |
+| `POST` | `/replay/start?run_id=&speed=` | Start streaming replay |
+| `POST` | `/replay/stop` · `GET` `/replay/status` | Stop / status (incl. `live_explain`, `alert_state`) |
+| `GET` | `/stream/events` | Server-sent-events feed of scored replay events |
+| `GET` | `/dashboard` | Serves the interactive HTML |
+
+---
+
+## Quick start
+
+### Docker (the demo path — one command)
 
 ```bash
 git clone https://github.com/Zenzencat/syncguard-agaif2026.git
 cd syncguard-agaif2026
-python -m venv .venv
-.venv\Scripts\activate      # Windows; use `source .venv/bin/activate` on macOS/Linux
-pip install -r requirements.txt
-```
-
-Download the dataset separately (excluded from this repo — see above) and place it under
-`raw/` at the repo root, so the layout looks like:
-
-```
-syncguard-agaif2026/
-├── raw/
-│   ├── Jamming/...
-│   ├── Spoofing/...
-│   ├── Meaconing/...
-│   └── Jamming+Spoofing/...
-├── extract_features.py
-...
-```
-
-**Dataset**: *GNSS Dataset Under Jamming, Spoofing, and Meaconing Conditions (JammerTest
-2024)*, Sayyaf, M. I., Ortiz, M., & Renaudin, V. (2025), Zenodo v3.
-**https://doi.org/10.5281/zenodo.15911589** — download
-`GNSS_DATASET_JAMMING_SPOOFING.tar.gz` (375.3 MB) from that page and extract it into `raw/`
-(the tarball's top-level folders — `Jamming/`, `Spoofing/`, `Meaconing/`,
-`Jamming+Spoofing/` — should land directly inside `raw/`).
-
-## Running the pipeline
-
-Run in this order from the repo root (with the venv activated):
-
-```bash
-python extract_features.py       # raw scenario logs -> processed/syncguard_features.{csv,parquet}
-python sanity_check.py           # stats + regenerates processed/scenario_2.1.1_clean_vs_spoofed.png
-python train_baseline_model.py   # trains the RandomForest baseline, writes baseline_model_report.md + processed/baseline_model_results.png
-```
-
-`extract_features.py` must run first — it produces `processed/syncguard_features.parquet`,
-which both other scripts read. Expect a few minutes total; `extract_features.py` processes 24
-scenarios (~1.4GB of CSVs). Both plots regenerate into `processed/` (gitignored, not
-committed, since it also holds the large feature CSV/Parquet) — the copies committed under
-`plots/` are snapshots included for convenience so the results are visible without running
-anything.
-
-## Spatial layer — REAL tower coordinates, SIMULATED severity/spread
-
-**The detector above is REAL and validated, and is never retrained or modified by this
-step.** `build_spatial_simulation.py` adds a separate, clearly-labeled spatial layer on top
-of it, answering *where* anomalies occur, whether *neighbouring sites* are correlated, and
-*which sites to prioritize* — none of which a per-recording detector can show on its own:
-
-- **REAL**: 136 real PT. Telkomsel cellular base-station sites (Kubu Raya and Pontianak, West
-  Kalimantan, Indonesia) — coordinates, site IDs, and names. Also REAL: the severity *scale*,
-  anchored to the detector's own `predict_proba()` output range on the held-out set (median
-  clean-row proba as the floor, 90th-percentile attack-row proba as the ceiling).
-- **SIMULATED**: which site is the spoofing epicenter, and how severity spreads to nearby
-  sites over time. No public dataset of real ASEAN base-station GNSS timing under spoofing
-  exists (see `dataset_notes.md`), so this spread is a documented distance-decay
-  simplification, not measured data.
-
-Full methodology, exact formula, and every parameter choice: [`spatial_layer_notes.md`](spatial_layer_notes.md).
-Every derived column/file this step produces is suffixed `_SIMULATED` so the real/simulated
-line can't be lost by truncation or a later rename. Outputs land in `spatial_processed/`
-(already included in this repo — see the table above).
-
-```bash
-python build_spatial_simulation.py   # run after train_baseline_model.py (reads processed/syncguard_features.parquet)
-```
-
-Regenerating `spatial_processed/` from scratch additionally requires
-`menaratelepon_ar_50k.csv` (the real Telkomsel tower dataset, from the AGAIF bootcamp's
-Module 6/AD1002 materials) at `spatial_raw/Module 6_AD1002_Dataset (Tower)/` — **included in
-this repo** (see "Repository contents" above) specifically so the API below can use it
-without requiring the full raw dataset download. The outputs already committed under
-`spatial_processed/` don't require re-running the script at all.
-
-## Serving layer, live replay, and real spatial correlation
-
-Everything in this section is new on top of the detector/offline-spatial-layer above, lives
-under `api/`, and follows the same REAL/SIMULATED discipline — see `api/spatial.py`'s module
-docstring for the exact split, summarized here:
-
-- **`POST /score`** — accepts one receiver telemetry reading (the same 23-feature schema the
-  detector trains on, see `api/schemas.py`), returns a real probability + severity from the
-  trained model. **`GET /health`** reports whether a trained model is loaded.
-- **Simulated live-feed replay** (`POST /replay/start?run_id=...&speed=...`, `/replay/stop`,
-  `/replay/status`) — replays `syncguard_features.parquet` row-by-row in real recording-time
-  order through the same scoring path as `/score`, as an asyncio background task inside the
-  same process (no Kafka, no separate service). Subscribe to `GET /stream/events` (SSE) for a
-  live feed, or poll `GET /events`.
-- **Real distance-weighted spatial correlation** (`api/spatial.py`) — distinct from, and does
-  not replace, `build_spatial_simulation.py`'s offline SIMULATED-epicenter layer above. When a
-  tower's live-scored severity comes in, its correlation score is a genuine haversine
-  distance-weighted aggregate of *other real towers' actual recent scored severities* within a
-  real time window — not a fixed, assumed epicenter. The one SIMULATED piece: which real tower
-  a given replayed event is attributed to (deterministic round-robin over the 136 real sites,
-  since the underlying dataset is a single receiver with no real per-tower mapping to use) —
-  every API response and DB row makes this explicit.
-- **Spatial statistics — global Moran's I & Local Moran's I / LISA** (`api/spatial_stats.py`,
-  `GET /spatial/autocorrelation`) — an established GeoAI method (PySAL's `esda`/`libpysal`,
-  not a custom metric) layered on top of, and additive to, the hand-rolled correlation above:
-  one number answering "is the network's current anomaly pattern spatially clustered right
-  now" (global Moran's I, with a permutation p-value), plus a per-tower classification into
-  High-High hotspots, Low-Low coldspots, and spatial outliers (LISA). Full method, weights
-  choice, and real worked examples in [`SPATIAL_STATISTICS.md`](SPATIAL_STATISTICS.md).
-- **Per-prediction explainability — SHAP** (`api/model_service.py`, `POST /score`,
-  `GET /events/{id}/explain`) — exact Tree SHAP over the shipped RandomForest, top 5 features
-  by contribution for any individual prediction, not just the model's global feature
-  importances. `POST /score` always computes it; replay computes it live only up to
-  `speed<=20` (above that, live replay throughput is too high relative to SHAP's ~50ms/row
-  cost — see `OPERATIONAL_METRICS.md` for the measured numbers) and explains any skipped
-  event lazily on demand instead — full method, the speed/design tradeoff, and real worked
-  examples (including a genuinely ambiguous near-threshold case) in
-  [`SHAP_EXPLAINABILITY.md`](SHAP_EXPLAINABILITY.md).
-- **Alert hysteresis / debouncing** (`api/hysteresis.py`) — a tower only shows as actively
-  `alerting` after 3 consecutive above-threshold readings (both configurable), and only clears
-  back to `normal` after 5 consecutive below-threshold — computed per replay session over the
-  recording's real temporal order (not per simulated tower — see `OPERATIONAL_METRICS.md` for
-  why), so a single flickering reading never spams an alert. Surfaced via `GET /events/map`,
-  `GET /replay/status`, and a distinct ◆ marker on the live map.
-- **Operational metrics** — real measured scoring latency (p50/p95/p99), replay throughput,
-  and concurrent-request behavior during replay, including two findings that corrected
-  earlier unmeasured assumptions in this repo's own docs rather than leaving them standing —
-  see [`OPERATIONAL_METRICS.md`](OPERATIONAL_METRICS.md), direct ammunition for the
-  Feasibility/Scalability side of the pitch.
-- **SQLite persistence** (`api/db.py`) — every scored event (from `/score` or replay) is
-  written to `data/syncguard.db` (`scored_events` table), including ground-truth labels for
-  replayed rows (for demo purposes — a real `/score` call has no ground truth), its SHAP
-  top-features explanation once computed, and its hysteresis-debounced `alert_state`.
-- **Dashboard**: `GET /dashboard` serves `syncguard_interactive_summary.html`, which now has a
-  live-replay section (top of the page) that talks to this API — connects, lets you pick a
-  scenario and speed, and renders the live tower map + event log via SSE, with Global Moran's
-  I/p-value headline stats, LISA cluster/outlier rings, and hysteresis-confirmed alert
-  diamonds on the map, refreshed live, plus a click-to-explain panel (event log row or map
-  marker) showing why that prediction was made. Everything below that section is unchanged
-  and still fully
-  static/offline.
-
-```bash
-make setup           # pip install -r requirements.txt -r requirements-api.txt
-make train           # trains + persists both models -- see "Model robustness" below
-make serve           # uvicorn api.main:app --host 0.0.0.0 --port 8000
-```
-
-Then open `http://localhost:8000/dashboard` and click Connect → Start replay. (No `make` on
-Windows outside Git Bash/WSL? Run the three underlying commands directly — see `Makefile`.)
-
-## Containerization
-
-```bash
 docker compose up --build
 ```
 
-One command, one container: the `Dockerfile` bakes in `processed/syncguard_features.parquet`
-and the tower CSV (both already in this repo, not the full raw dataset) and trains both
-models at image-build time, so the container starts ready to serve — no separate training
-step, and no model artifact committed to git. SQLite persists to a named volume across
-restarts. Open `http://localhost:8000/dashboard` once it's healthy.
+The image trains both model artifacts at build time from the committed feature table
+(`processed/syncguard_features.parquet`) and the committed tower CSV — **the ~1.4 GB raw
+dataset is not needed to run the service.** Once healthy, open
+**<http://localhost:8000/dashboard>**, click **Connect → Start replay**. SQLite persists to a
+named volume across restarts.
 
-## Model robustness
+### Local (venv)
 
-`train_improved_model.py` addresses the two limitations named in `baseline_model_report.md`
-(clean recall 64.4%, jamming recall 87.1%) via decision-threshold tuning, selected through
-cross-validation rather than a single held-out recording. **`ROBUSTNESS_NOTES.md` documents
-this honestly, including two fixes (jamming sample reweighting, and an earlier, looser
-threshold choice) that looked promising in initial testing and were rejected once measured
-properly against the real held-out set** — worth reading if you're deciding whether to trust
-the numbers. Shipped result, same held-out TEST set as the baseline: clean recall 64.4% →
-66.7%, with jamming recall essentially preserved (87.1% → 85.8%) and every other attack
-type's recall unchanged. Full comparison in `improved_model_report.md`.
+```bash
+python -m venv .venv
+.venv\Scripts\activate            # Windows;  source .venv/bin/activate  on macOS/Linux
+make setup                        # pip install -r requirements.txt -r requirements-api.txt
+make train                        # train_baseline_model.py + train_improved_model.py -> models/
+make serve                        # uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
 
-## Interactive summary
+No `make` on Windows outside Git Bash/WSL — run the commands from the [`Makefile`](Makefile)
+directly.
 
-[`syncguard_interactive_summary.html`](syncguard_interactive_summary.html) can still be
-downloaded and opened directly in a browser (or `file://`'d) — the detector-evidence and
-offline-map sections work fully offline, no server or build step required, same as before.
-The live-replay section at the top of the page is the one addition that talks to a server
-(the API above) when it's running, and shows "not connected" gracefully otherwise. Same
-REAL/SIMULATED labeling throughout, shown directly in the UI, not just in a caption.
+### Hitting the API
 
-## Results
+```bash
+curl -s localhost:8000/health
 
-See [`baseline_model_report.md`](baseline_model_report.md) for the full write-up (precision/
-recall/F1 per class, confusion matrix, ROC-AUC 0.916, PR-AUC 0.968, per-attack-type recall, and
-feature importances) and [`plots/baseline_model_results.png`](plots/baseline_model_results.png)
-for the confusion matrix + feature importance chart. `dataset_notes.md` and
-`plots/scenario_2.1.1_clean_vs_spoofed.png` cover the earlier feature-sanity-check stage.
-`spatial_layer_notes.md` and `spatial_processed/` cover the spatial layer (see above).
-[`improved_model_report.md`](improved_model_report.md) and `ROBUSTNESS_NOTES.md` cover the
-robustness pass (see "Model robustness" above). `project_abstract.md` is the submission-ready
-summary of all of the above.
+# score one reading (any subset of the 23 features; missing ones are median-imputed)
+curl -s -X POST localhost:8000/score -H 'content-type: application/json' \
+  -d '{"snr_l1_mean": 34.0, "agc_cnt_mean": 4200, "jam_ind_mean": 60, "pr_doppler_residual_std": 180}'
 
-## License
+# start a fast replay and watch the stream
+curl -s -X POST "localhost:8000/replay/start?speed=25"
+curl -sN localhost:8000/stream/events
+curl -s localhost:8000/spatial/autocorrelation
+```
 
-**This repository's code** (the `.py` files, this README) is licensed under the [MIT
-License](LICENSE).
+---
 
-**The dataset is not covered by that license and is not included in this repository.** It is a
-separate work, licensed by its original authors (Sayyaf, Ortiz & Renaudin, 2025) under the GNU
-General Public License v3.0 or later, as stated on its
-[Zenodo record](https://doi.org/10.5281/zenodo.15911589). If you use the dataset, cite it and
-its associated paper (V. Renaudin, M. I. Sayyaf, F. L. Bourhis and M. Ortiz, "GNSS Positioning
-Under Threat: The Rising Risk to Existing Systems and the Role of Alternative Indoor and
-Seamless Navigation Technologies," IEEE JISPIN, doi: 10.1109/JISPIN.2025.3629705) per the
-terms on that page — do not assume this repo's MIT license extends to it.
+## Architecture
+
+```
+                    train_baseline_model.py            (23-feat RandomForest, split by recording,
+                    train_improved_model.py             threshold tuned by 4-fold GroupKFold CV)
+                              │
+                              ▼
+              models/model.joblib   ──────────────  pipeline + feature list + decision threshold
+              (+ model_baseline.joblib)              + severity floor/ceiling + version
+                              │
+                   ┌──────────┴───────────┐
+                   ▼                      ▼
+        ModelService.score()      shap.TreeExplainer      (loaded once at startup;
+        (n_jobs=1, deterministic)  (exact Tree SHAP)       RF forced single-threaded for
+                   │                      │                 run-to-run reproducibility)
+                   └──────────┬───────────┘
+                              ▼
+                        api/main.py  (FastAPI)
+             ┌────────────────┼───────────────────────────┐
+             ▼                ▼                           ▼
+     POST /score      ReplayManager  (asyncio task)   GET /spatial/autocorrelation
+             │         reads processed parquet,             │
+             │         scores row-by-row                    │  KNN weights over 136 real
+             ▼                │                              │  towers → global + local
+       EventStore  ◄──────────┤ writes every event           │  Moran's I  (esda/libpysal)
+       (SQLite,   ────────────┤                              │
+        data/*.db) │          ▼                              │
+             │     │     EventBus ──► GET /stream/events (SSE)│
+             │     │                                          │
+             ▼     ▼                                          ▼
+     LiveCorrelationEngine  (distance-weighted        syncguard_interactive_summary.html
+      aggregate of recent real-tower severities)       (polls /events/map + /spatial/*,
+                                                        subscribes /stream/events)
+```
+
+Two model artifacts are built: `model_baseline.joblib` (threshold 0.50, untuned) and
+`model.joblib` (threshold 0.52, **what the API serves**). `ModelService` falls back to the
+baseline with a loud warning if the tuned artifact is missing.
+
+The offline spatial layer (`build_spatial_simulation.py` → `spatial_processed/`) is a separate,
+older view kept for the static dashboard sections — see *REAL vs SIMULATED* below.
+
+---
+
+## The model
+
+**RandomForest** (300 trees, `class_weight='balanced'`, median imputation), 23 features, one
+row per **~1 Hz epoch** — the feature table is built on the receiver's ~1 Hz PVT-solution
+timeline (`nav_pvt.csv`); the ~5 Hz per-satellite `rinex.csv` observables are aggregated per
+epoch and merge-asof'd onto it. Features: per-epoch C/N0 stats, Doppler mean/std, a
+code-Doppler pseudorange-rate residual (ephemeris-free spoofing indicator), u-blox RF-monitor
+fields (AGC, noise floor, jamming indicator), receiver solution-quality metrics, and a
+stationary-only position-deviation proxy. Scenario metadata (attack type, receiver state,
+band) is **excluded** — a deployed detector wouldn't have it.
+
+**Evaluation** — split by *recording*, not by row (rows within a recording are ~1 Hz samples of
+one autocorrelated signal). 16 recordings / 30,562 rows train; 8 held-out recordings / 14,077
+rows test (one dynamic + one stationary per attack type). Numbers below are recomputed directly
+from the persisted artifacts by [`evaluate_models.py`](evaluate_models.py):
+
+| Held-out TEST (8 recordings) | Baseline (t=0.50) | **Shipped (t=0.52)** |
+|---|---|---|
+| Accuracy | 0.875 | **0.877** |
+| Clean-class recall | 0.642 | **0.667** |
+| False positive rate | 0.358 | **0.333** |
+| Attack recall | 0.942 | **0.937** |
+| ROC-AUC / PR-AUC | 0.916 / 0.968 | **0.916 / 0.968** |
+| Jamming recall | 0.872 | **0.859** |
+| Meaconing recall | 0.965 | **0.965** |
+| Spoofing recall | 0.973 | **0.971** |
+| Spoofing + Jamming recall | 0.985 | **0.985** |
+
+The threshold move (0.50 → 0.52) trades a little attack recall for a −2.5 pt false-positive
+rate, chosen by 4-fold GroupKFold CV subject to jamming recall not dropping — [`ROBUSTNESS_NOTES.md`](ROBUSTNESS_NOTES.md).
+
+### Known limitations — stated, not smoothed
+
+- **Clean-class recall (~67%) is well below attack recall (~94%).** Under proper 4-fold
+  GroupKFold it swings from 0.36 to 0.79 depending on which recordings are held out (mean
+  0.66 ± 0.20) — the honest confidence range, driven by session-to-session variation in each
+  recording's quiet RF baseline ([`CALIBRATION_NOTES.md`](CALIBRATION_NOTES.md) §1, [`FOLD_ANALYSIS.md`](FOLD_ANALYSIS.md)).
+- **The model leans on u-blox's own RF-monitor fields** (AGC, noise floor, jamming indicator)
+  more than the purpose-built spoofing-specific features. It's partly re-deriving signal
+  commodity firmware already exposes.
+- **These are data limitations, not modelling gaps** — established across six independent
+  experiments (next section).
+
+---
+
+## REAL vs SIMULATED — the boundary, stated plainly
+
+This is a strength of the submission and is labelled everywhere it surfaces (API responses, DB
+column comments, dashboard UI, every `_SIMULATED`-suffixed file).
+
+**REAL:**
+
+- **Signal-level ground truth** — the detector is trained and evaluated on real u-blox GNSS
+  receiver logs recorded under *real* jamming / spoofing / meaconing attacks at a controlled
+  interference test range (JammerTest 2024, Andøya Space Defense, Bleik, Norway). Not synthetic.
+- **Tower geometry** — 136 real PT. Telkomsel base-station sites (Kubu Raya & Pontianak, West
+  Kalimantan) — coordinates, site IDs, names, from the AGAIF bootcamp's Module 6 materials.
+- **Severity scale** — anchored to the detector's own `predict_proba()` on the held-out set:
+  floor 0.43 (median clean-row probability), ceiling 0.993 (90th-percentile attack-row
+  probability). Not invented numbers.
+- **Spatial machinery** — haversine / great-circle distances, k-NN spatial weights, and global
+  + local Moran's I are standard PySAL implementations applied as the literature defines them,
+  over real coordinates and real scored severities.
+
+**SIMULATED (and labelled):**
+
+- **Per-event tower attribution** — which physical tower a given scored event "comes from."
+  The dataset is a *single receiver's* log, so there is no real per-tower mapping; events are
+  assigned to real towers by deterministic round-robin. Every API response and DB row says so.
+- **The distance-decay weighting** (`decay_km = 2.0`) — a documented simplifying assumption for
+  "nearby infrastructure sharing correlated timing anomalies," not a measured RF-propagation
+  model.
+- **`build_spatial_simulation.py`'s offline layer** — a fixed simulated epicenter and a
+  simulated spread over four illustrative time steps, on real coordinates.
+
+**Framing gap, carried explicitly into the roadmap:** this is *receiver-level* GNSS data, not
+base-station GNSSDO timing data, and no public dataset of the latter under spoofing exists. A
+base-station receiver is also *stationary*, while ~half the dataset is vehicle-mounted — see
+[`STATIONARY_SCOPE.md`](STATIONARY_SCOPE.md) and [`project_abstract.md`](project_abstract.md) §3.
+
+---
+
+## The experiment record — six negative results, on purpose
+
+The shipped detector's limitations above prompted six independent attempts to improve it, each
+held to the same bar: a genuine improvement must survive **both** a rotating 4-fold GroupKFold
+*and* the fixed held-out TEST split, with no jamming-recall regression. **All six were
+rejected** — and consistently, for the same reason: with 24 recordings (~5 per attack type),
+there isn't enough independent data to learn a feature- or tuning-level change that generalizes
+across recording configurations. Each idea looks good on one evaluation and a *different*
+recording breaks it on the other.
+
+| Attempt | Notes file | Outcome |
+|---|---|---|
+| Jamming sample reweighting | [`ROBUSTNESS_NOTES.md`](ROBUSTNESS_NOTES.md) | Made TEST clean *and* jamming recall worse |
+| Probability calibration (isotonic / sigmoid) | [`CALIBRATION_NOTES.md`](CALIBRATION_NOTES.md) | Isotonic bought clean recall at −10.5 pt jamming recall |
+| Session-relative feature normalization | [`NORMALIZATION_NOTES.md`](NORMALIZATION_NOTES.md) | Oracle version −33.6 pt jamming on the target fold; deployable version did nothing |
+| XGBoost vs RandomForest | [`GBM_COMPARISON.md`](GBM_COMPARISON.md) | −9.5 pt jamming recall for +3.1 pt clean recall |
+| Carrier-phase / L2 / per-constellation features | [`SPOOFING_FEATURES.md`](SPOOFING_FEATURES.md) + [`STATIONARY_SCOPE.md`](STATIONARY_SCOPE.md) | Cleared GroupKFold; −9.2 pt jamming / −8.6 pt clean on the fixed split. Stationary-only re-scope blocked: 1 of 7 jamming recordings is stationary. |
+| Per-satellite temporal-coherence features | [`TEMPORAL_COHERENCE.md`](TEMPORAL_COHERENCE.md) | Null on GroupKFold; −5 pt clean recall on the fixed split |
+
+Plus [`FOLD_ANALYSIS.md`](FOLD_ANALYSIS.md) — a root-cause diagnostic of the worst CV fold.
+
+This is a differentiator, not an apology: the ceiling was **established rigorously**, with a
+consistent bar and reproducible scripts, rather than assumed. The productive next step is more
+data — more recordings, more power/band configurations per attack type — not more features.
+
+---
+
+## Data
+
+**Dataset** — *GNSS Dataset Under Jamming, Spoofing, and Meaconing Conditions (JammerTest
+2024)*, Sayyaf, Ortiz & Renaudin (2025), Zenodo v3:
+**<https://doi.org/10.5281/zenodo.15911589>**. Download `GNSS_DATASET_JAMMING_SPOOFING.tar.gz`
+(375 MB compressed, ~1.4 GB extracted) and extract so `Jamming/`, `Spoofing/`, `Meaconing/`,
+`Jamming+Spoofing/` land directly under `raw/` at the repo root. 24 scenarios (Jamming 7,
+Spoofing 8, Meaconing 5, Jamming+Spoofing 4), u-blox receiver logs — per-satellite
+pseudorange/carrier-phase/Doppler/SNR, ~1 Hz PVT solutions, RF-monitor telemetry.
+`extract_features.py` reads the tree from `./raw/` at the repo root. (The standalone
+feature-experiment extractors — `extract_spoofing_features.py`, `extract_temporal_features.py`
+— also honour `$SYNCGUARD_RAW_ROOT`.)
+
+**Committed so the service runs without the raw download:**
+`processed/syncguard_features.parquet` (~5 MB, 44,639 feature rows) and
+`spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv` (the real tower
+coordinates). Everything else in `processed/` and `models/` is regenerated by the scripts —
+see [`.gitignore`](.gitignore).
+
+**To reproduce from scratch:**
+
+```bash
+python extract_features.py        # raw scenario logs -> processed/syncguard_features.{csv,parquet}
+python sanity_check.py            # stats + the clean-vs-spoofed sanity plot
+python train_baseline_model.py    # -> models/model_baseline.joblib, baseline_model_report.md
+python train_improved_model.py    # -> models/model.joblib, improved_model_report.md
+python evaluate_models.py         # recompute the TEST-set table above from the artifacts
+python build_spatial_simulation.py  # offline SIMULATED spatial layer -> spatial_processed/
+```
+
+**Feature provenance, quirks, and the abandoned FGI-JSDR/MATLAB plan:** [`dataset_notes.md`](dataset_notes.md).
+
+---
+
+## Licensing
+
+**This repository's code** (`.py` files, this README) — [MIT License](LICENSE).
+
+**The dataset is a separate work, not included here, not covered by that license.** It is
+licensed by its authors under the **GNU GPL v3.0 or later** (as stated on the Zenodo record).
+If you use it, cite the dataset and its paper: V. Renaudin, M. I. Sayyaf, F. L. Bourhis and
+M. Ortiz, *"GNSS Positioning Under Threat: The Rising Risk to Existing Systems and the Role of
+Alternative Indoor and Seamless Navigation Technologies,"* IEEE Journal of Indoor and Seamless
+Positioning and Navigation, doi:10.1109/JISPIN.2025.3629705.
