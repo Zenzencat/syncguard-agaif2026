@@ -10,7 +10,7 @@ clear win of the session — clean recall, FPR, *and* jamming recall all improve
 Gini confirmed the model uses the new carrier-phase / L2 / per-constellation signal. But when
 the full 34-feature model was actually retrained and evaluated on the **fixed 8-recording
 held-out TEST split** that the shipped reports and dashboard use, it regressed hard: jamming
-recall −9.2pt, clean recall −8.6pt, ROC-AUC −1.8pt. The regression is systematic (dynamic
+recall −9.1pt, clean recall −8.6pt, ROC-AUC −1.8pt. The regression is systematic (dynamic
 degraded-reception recordings) and mechanistically explained, not fold noise. The shipped
 model was reverted and is unchanged. Full story below — the GroupKFold analysis is kept
 because the *method* and the SHAP evidence remain valid; only the ship decision changed.
@@ -231,7 +231,7 @@ approved.
 |---|---|---|---|
 | Accuracy | 0.877 | 0.835 | **−4.2pt** |
 | Clean recall | 0.667 | 0.581 | **−8.6pt** |
-| **Jamming recall** | **0.859** | **0.767** | **−9.2pt** |
+| **Jamming recall** | **0.858** | **0.767** | **−9.1pt** |
 | ROC-AUC | 0.916 | 0.898 | **−1.8pt** |
 | Meaconing / Spoofing / Spoof+Jam recall | 0.965 / 0.971 | 0.967 / 0.968 | ~flat |
 
@@ -267,7 +267,7 @@ retrained, evaluated, and reverted; it is staged (not applied) for reference.
 
 The honest bar was "a genuine GroupKFold-validated improvement with no meaningful jamming
 regression, **especially on the shipped evaluation**." It clears the first half and fails the
-second: −9.2pt jamming recall and −8.6pt clean recall on the fixed TEST split a judge sees is
+second: −9.1pt jamming recall and −8.6pt clean recall on the fixed TEST split a judge sees is
 a meaningful regression, not fold noise — it is a systematic weakness on dynamic
 degraded-reception recordings, reproducible and mechanistically explained.
 
@@ -307,7 +307,7 @@ carrier-phase/L2/per-constellation structure is genuine — but neither is suffi
   `extract_features.py`, `processed/syncguard_features.parquet`, `api/`,
   `train_baseline_model.py`, `train_improved_model.py`, `baseline_model_report.md`,
   `improved_model_report.md`, and every deployed threshold. `evaluate_models.py` confirms the
-  restored shipped model matches `ROBUSTNESS_NOTES.md` exactly (jamming 0.872 → 0.859, clean
+  restored shipped model matches `ROBUSTNESS_NOTES.md` exactly (jamming 0.872 → 0.858, clean
   0.642 → 0.667).
 
 ## Where this lives

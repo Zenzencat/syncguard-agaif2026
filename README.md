@@ -166,7 +166,7 @@ from the persisted artifacts by [`evaluate_models.py`](evaluate_models.py):
 | False positive rate | 0.358 | **0.333** |
 | Attack recall | 0.942 | **0.937** |
 | ROC-AUC / PR-AUC | 0.916 / 0.968 | **0.916 / 0.968** |
-| Jamming recall | 0.872 | **0.859** |
+| Jamming recall | 0.872 | **0.858** |
 | Meaconing recall | 0.965 | **0.965** |
 | Spoofing recall | 0.973 | **0.971** |
 | Spoofing + Jamming recall | 0.985 | **0.985** |
@@ -241,7 +241,7 @@ recording breaks it on the other.
 | Probability calibration (isotonic / sigmoid) | [`CALIBRATION_NOTES.md`](CALIBRATION_NOTES.md) | Isotonic bought clean recall at −10.5 pt jamming recall |
 | Session-relative feature normalization | [`NORMALIZATION_NOTES.md`](NORMALIZATION_NOTES.md) | Oracle version −33.6 pt jamming on the target fold; deployable version did nothing |
 | XGBoost vs RandomForest | [`GBM_COMPARISON.md`](GBM_COMPARISON.md) | −9.5 pt jamming recall for +3.1 pt clean recall |
-| Carrier-phase / L2 / per-constellation features | [`SPOOFING_FEATURES.md`](SPOOFING_FEATURES.md) + [`STATIONARY_SCOPE.md`](STATIONARY_SCOPE.md) | Cleared GroupKFold; −9.2 pt jamming / −8.6 pt clean on the fixed split. Stationary-only re-scope blocked: 1 of 7 jamming recordings is stationary. |
+| Carrier-phase / L2 / per-constellation features | [`SPOOFING_FEATURES.md`](SPOOFING_FEATURES.md) + [`STATIONARY_SCOPE.md`](STATIONARY_SCOPE.md) | Cleared GroupKFold; −9.1 pt jamming / −8.6 pt clean on the fixed split. Stationary-only re-scope blocked: 1 of 7 jamming recordings is stationary. |
 | Per-satellite temporal-coherence features | [`TEMPORAL_COHERENCE.md`](TEMPORAL_COHERENCE.md) | Null on GroupKFold; −5 pt clean recall on the fixed split |
 
 Plus [`FOLD_ANALYSIS.md`](FOLD_ANALYSIS.md) — a root-cause diagnostic of the worst CV fold.

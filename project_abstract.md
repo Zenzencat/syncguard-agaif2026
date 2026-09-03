@@ -57,6 +57,19 @@ curriculum's own edge-deployment guidance (Module 7 Session 4 — "Edge Device: 
 cell tower"), the intended deployment target is the base station itself, so detection keeps
 functioning locally even if the spoofing event also degrades backhaul connectivity.
 
+Since the initial submission, SyncGuard has grown from a batch detector into a running,
+explainable service. A FastAPI scoring endpoint returns, for one telemetry reading, an attack
+probability, a severity normalized to the model's own confidence range, and a per-prediction
+SHAP explanation naming which observables drove the call. A streaming replay mode plays a
+recording through the live scoring path row-by-row over server-sent events, for
+demonstration. On top of the tower network it computes established spatial statistics —
+global and local Moran's I (LISA) via PySAL — to answer whether flagged sites are spatially
+clustered right now. Alert state is debounced with hysteresis so a single threshold flicker
+never raises an alarm. The whole service runs from one `docker compose` command; measured
+end-to-end scoring latency is sub-100 ms at the median (full request over HTTP, SHAP
+explanation included). Endpoints, architecture, and the full evidence trail are in the
+repository README.
+
 ## 3. Data Sources
 *(PDGS Canvas C4 — Data Requirements)*
 
@@ -115,11 +128,17 @@ softened anywhere else this appears (plots, notebooks, or this document):**
   Pontianak, West Kalimantan, Indonesia — `menaratelepon_ar_50k.csv`, sourced from the AGAIF
   bootcamp's own Module 6 (AD1002) materials. Verified clean: no missing coordinates, no
   duplicate coordinates, one coherent region.
-- **REAL**: the severity *scale* used on the map is anchored to the Jammertest-2024 detector's
-  own, actual `predict_proba()` output — not invented numbers. Re-running the validated
-  Pipeline from §4/§5 in-memory and self-checking it against the published classification
-  report reproduces median predicted probability = **0.953** on true attack rows (n=10,940)
-  and **0.430** on true clean rows (n=3,137); these become the severity ceiling/floor.
+- **REAL**: the severity *scale* is anchored to the detector's own `predict_proba()` output on
+  the held-out set — not invented numbers: **floor 0.430** (median probability on true clean
+  rows), **ceiling 0.993** (90th-percentile probability on true attack rows). The same two
+  values are used by the live API's severity normalization and by the offline spatial layer.
+- **REAL (live spatial statistics)**: the running service computes global and local Moran's I
+  (LISA) over whichever real towers currently have a scored severity — standard PySAL
+  implementations over real great-circle tower geometry and real `predict_proba`-derived
+  severities, not a custom metric. The one element it inherits from the SIMULATED side is the
+  same one labelled below: which physical tower each scored event is attributed to
+  (deterministic round-robin — the dataset is a single receiver with no real per-tower
+  mapping). Every API response and stored row states this.
 - **SIMULATED**: everything about *where* an attack originates and *how* it spreads. No
   public dataset of real ASEAN base-station GNSS timing under spoofing exists (same gap
   as above), so there is no measured spread to show. Instead, one real tower site (the one
@@ -131,9 +150,10 @@ softened anywhere else this appears (plots, notebooks, or this document):**
   simplifying assumption standing in for "nearby infrastructure sharing correlated GNSS
   timing anomalies," not a measured or validated propagation model.
 
-Full methodology and every parameter choice: `agaif-materials/dataset/spatial_layer_notes.md`.
-Every column, filename, and plot title this layer produces carries an explicit `SIMULATED`
-marker so the distinction cannot be lost by truncation, copy-paste, or a later rename.
+Full methodology and every parameter choice: `spatial_layer_notes.md` (offline layer),
+`SPATIAL_STATISTICS.md` (live Moran's I / LISA). Every column, filename, and plot title the
+offline layer produces carries an explicit `SIMULATED` marker so the distinction cannot be
+lost by truncation, copy-paste, or a later rename.
 
 ## 4. Methodology
 *(PDGS Canvas C6 — GeoAI Solution Design; C7 — Technology Stack)*
@@ -151,11 +171,14 @@ and uninformative in the scenarios inspected, since this dataset has no `NAV-CLO
 message and a proper clock-bias solve would require broadcast ephemeris not included in the
 data. We report this honestly rather than carry forward a feature known not to work.
 
-**Model**: a RandomForestClassifier baseline (300 trees, `class_weight='balanced'` to handle
-the dataset's 77%/23% attack/clean imbalance via reweighting rather than discarding data),
+**Model**: a RandomForestClassifier (300 trees, `class_weight='balanced'` to handle the
+dataset's 77%/23% attack/clean imbalance via reweighting rather than discarding data),
 following the curriculum's own guidance (Module 6 Session 6) that Random Forest is a sound,
 interpretable starting point before moving to gradient-boosted alternatives — appropriate given
-the hackathon timeline.
+the hackathon timeline. **The shipped detector is this exact forest evaluated at a decision
+threshold of 0.52** — selected by 4-fold GroupKFold cross-validation (`ROBUSTNESS_NOTES.md`),
+not a separate or retrained model — and §5's results are reported at that operating point; the
+untuned 0.50 baseline is in `baseline_model_report.md`.
 
 **Evaluation split**: by recording, not by row. Rows within one recording are ~1 Hz samples of
 a continuous, highly autocorrelated signal; a random row-level split would place near-duplicate
@@ -181,39 +204,53 @@ assigned by exponential distance decay (`decay_km = 2.0`, chosen — not measure
 flagged set grows from 3 sites at the first illustrative time step to 21 at the last, a
 localized footprint rather than the near-uniform 116/136 an earlier, looser decay constant
 produced). Sites are ranked by SIMULATED severity to produce a priority list. This whole step
-is implemented in `agaif-materials/dataset/build_spatial_simulation.py`, runs headless with no
-network calls, and writes `simulated_spatial_anomaly_SIMULATED.csv` plus the map/spread-over-
-time plots referenced in §5.
+is implemented in `build_spatial_simulation.py`, runs headless with no network calls, and
+writes `simulated_spatial_anomaly_SIMULATED.csv` plus the map/spread-over-time plots
+referenced in §5.
 
 ## 5. Results
 
 | | Precision | Recall | F1 |
 |---|---|---|---|
-| Clean (0) | 0.759 | 0.644 | 0.697 |
-| Attack (1) | 0.902 | 0.941 | 0.921 |
+| Clean (0) | 0.752 | 0.667 | 0.707 |
+| Attack (1) | 0.908 | 0.937 | 0.922 |
 
-Overall accuracy **87.5%**, ROC-AUC **0.916**, PR-AUC (average precision) **0.968**, on 8
-held-out recordings never seen during training.
+Overall accuracy **87.7%**, ROC-AUC **0.916**, PR-AUC (average precision) **0.968**, on 8
+held-out recordings never seen during training, at the shipped decision threshold 0.52 (see
+§4; the untuned 0.50 baseline is in `baseline_model_report.md`).
 
-**Recall by attack type** (of true attack rows): Spoofing+Jamming 98.5%, Spoofing 97.2%,
-Meaconing 96.5%, Jamming 87.1% (weakest of the four).
+**Recall by attack type** (of true attack rows): Spoofing+Jamming 98.5%, Spoofing 97.1%,
+Meaconing 96.5%, Jamming 85.8% (weakest of the four).
 
 **Two limitations, stated as such rather than minimized**:
 
-1. **Clean-class recall (64.4%) is noticeably weaker than attack-class recall (94.1%)** — a
-   meaningful fraction of clean rows are misclassified as attack. The likely cause is domain
-   shift: each recording's own "quiet" RF noise floor varies somewhat session-to-session, and
-   the held-out recordings' baselines differ slightly from what the model saw in training. This
-   points to a concrete next step — per-session or per-site baseline calibration — rather than
-   a fundamental flaw in the feature set.
+1. **Clean-class recall — 66.7% on the fixed held-out split, and 0.36–0.79 across the four
+   GroupKFold folds (mean 0.66 ± 0.20, the honest confidence range) — is well below attack
+   recall (93.7%).** A meaningful fraction of clean rows are misclassified as attack. The
+   likely cause is domain shift: each recording's own "quiet" RF noise floor varies
+   session-to-session, and the held-out recordings' baselines differ slightly from what the
+   model saw in training. This points to per-session or per-site baseline calibration, not a
+   fundamental flaw in the feature set.
 2. **Feature importance leans on u-blox's built-in RF-monitor fields** (AGC count, noise
    floor, jamming indicator together account for the top share of importance) rather than on
    the purpose-built spoofing-specific features (code-Doppler residual, position deviation),
-   which rank lower. In effect, this baseline is currently doing well partly by re-deriving
-   signal already available in commodity receiver firmware. The differentiated, harder-to-spoof
-   signal (code-Doppler consistency, position-jump detection) is present and usable but not yet
-   the dominant driver — sharpening its contribution is the priority for the next modeling
-   iteration, not a claim we're making about this baseline.
+   which rank lower. The detector is doing well partly by re-deriving signal already available
+   in commodity receiver firmware; whether the purpose-built signal can be made dominant on
+   this dataset is exactly what the six experiments below tested.
+
+**We tried, rigorously, to close limitation 1.** Six independent experiments targeted the
+clean-recall gap — sample reweighting, probability calibration, session-relative feature
+normalization, gradient boosting, and two feature-engineering approaches that mine
+carrier-phase, dual-frequency, per-constellation and temporal-coherence structure the standard
+pipeline discards. Each was held to one bar: a genuine improvement must survive **both** a
+rotating 4-fold GroupKFold **and** the fixed held-out split, with no jamming-recall
+regression. All six converged on the same conclusion — with 24 recordings (~5 per attack type)
+there is not enough independent data for a change to generalize across recording
+configurations; a gain on one evaluation is broken by a different recording on the other.
+**The ceiling is a data-diversity limit, not a modelling gap, and we can name what would raise
+it:** more recordings, more power/band configurations per attack type, and stationary
+base-station telemetry specifically. Full evidence trail — six experiments across seven
+dedicated notes files — is in the repository.
 
 **Scope of claim**: these results demonstrate detectability of jamming/spoofing/meaconing
 signatures in real GNSS-receiver observables at a controlled test range. They do not yet
@@ -222,10 +259,11 @@ above) — that validation is future work, not a claim of this submission.
 
 **Spatial evidence — where, neighbouring, and prioritize** (methodology in §4, real/SIMULATED
 data split in §3): applying the spatial layer to the 136 real Kubu Raya/Pontianak tower sites
-produces `agaif-materials/dataset/spatial_processed/spatial_anomaly_map_SIMULATED.png` (real
-site locations, SIMULATED severity and epicenter, top-5 priority sites labeled) and
-`spatial_anomaly_spread_over_time_SIMULATED.png` (SIMULATED flagged-site count widening 3 → 6
-→ 12 → 21 across four illustrative steps). This is the answer to the three gaps named in §1:
+produces `spatial_processed/spatial_anomaly_map_SIMULATED.png` (real site locations,
+SIMULATED severity and epicenter, top-5 priority sites labeled) and
+`spatial_processed/spatial_anomaly_spread_over_time_SIMULATED.png` (SIMULATED flagged-site
+count widening 3 → 6 → 12 → 21 across four illustrative steps). This is the answer to the
+three gaps named in §1:
 *where* — the map plots SIMULATED severity directly onto real coordinates; *neighbouring* —
 sites near the SIMULATED epicenter show correlated SIMULATED severity, falling off with real
 distance; *prioritize* — `simulated_spatial_anomaly_SIMULATED.csv` ranks all 136 real sites by
@@ -293,9 +331,11 @@ Claude (Anthropic) was used throughout this project's dataset and modeling work:
 and evaluating candidate GNSS datasets (including identifying that the originally planned
 FGI-JSDR/FGI-GSRx pipeline required MATLAB, which was unavailable, and locating the Jammertest
 2024 Zenodo dataset used instead), writing the Python feature-extraction and model-training
-code, building the spatial layer described in §3–§5 (selecting the real tower dataset, writing
-`build_spatial_simulation.py`, and choosing/documenting the SIMULATED epicenter and
-distance-decay methodology), and drafting this abstract from the team's results and decisions.
+code, the FastAPI serving layer with SHAP explainability and spatial-statistics integration,
+and the six model-improvement experiments summarized in §5; building the spatial layer
+described in §3–§5 (selecting the real tower dataset, writing `build_spatial_simulation.py`,
+and choosing/documenting the SIMULATED epicenter and distance-decay methodology); and drafting
+this abstract from the team's results and decisions.
 All code was executed and all outputs — the extracted features, the trained model's metrics,
 the spatial-layer outputs, and the claims made in this document — were reviewed and validated
 by the team before inclusion, including the real/SIMULATED framing itself. No part of the

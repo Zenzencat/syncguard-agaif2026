@@ -44,10 +44,10 @@ names, not in plot titles, not in prose. Concretely:
   and self-checking the reproduced classification report against
   `baseline_model_report.md` before trusting any of its numbers (see
   `build_spatial_simulation.py::reproduce_validated_model()`). On the held-out Norway test
-  set this run produced: median proba on true attack rows = **0.953** (n=10,940), median
-  proba on true clean rows = **0.430** (n=3,137). These two numbers anchor the simulated
-  severity scale below — they are the real model's own confidence floor and ceiling, not
-  invented numbers.
+  set this run produced median proba = **0.953** on true attack rows, **0.430** on true clean
+  rows (n=10,940 / 3,137). The severity scale below is anchored to the model's own confidence
+  range — **floor 0.430** (median clean-row proba), **ceiling 0.993** (90th-percentile
+  attack-row proba, the "confidently detected" reference) — not invented numbers.
 
 ## What is SIMULATED, and why
 

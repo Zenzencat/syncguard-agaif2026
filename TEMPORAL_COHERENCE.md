@@ -110,6 +110,11 @@ real gain anywhere either.
 | Spoofing+Jamming recall | 0.985 | 0.985 | 0.000 |
 | ROC-AUC | 0.916 | 0.919 | +0.003 |
 
+*(BASE here is this script's own refit on the fixed-split training rows in `(run_id,
+real_time)` order; its absolutes sit within ~0.005 of the shipped artifact's
+`improved_model_report.md` numbers — RandomForest bootstrap is mildly row-order sensitive — so
+read the Δ column, not the BASE absolutes.)*
+
 **Per-recording clean recall / attack recall (@ t=0.52):**
 
 | Recording | BASE clean / attack | BASE+NEW clean / attack | note |
@@ -193,7 +198,7 @@ to learn a feature-level improvement that generalizes across recording configura
 | 2 | Isotonic / sigmoid calibration (`CALIBRATION_NOTES.md`) | Isotonic bought clean recall at −10.5pt jamming recall |
 | 3 | Session-relative normalization (`NORMALIZATION_NOTES.md`) | Oracle version −33.6pt jamming on the one fold it was meant to fix; deployable version did nothing |
 | 4 | XGBoost (`GBM_COMPARISON.md`) | −9.5pt jamming recall for +3.1pt clean recall |
-| 5 | Per-epoch spatial spoofing features (`SPOOFING_FEATURES.md` + `STATIONARY_SCOPE.md`) | Cleared GroupKFold, −9.2pt jamming / −8.6pt clean on the fixed split (dynamic degraded-reception recordings); stationary-only re-scope blocked by 1 stationary jamming recording |
+| 5 | Per-epoch spatial spoofing features (`SPOOFING_FEATURES.md` + `STATIONARY_SCOPE.md`) | Cleared GroupKFold, −9.1pt jamming / −8.6pt clean on the fixed split (dynamic degraded-reception recordings); stationary-only re-scope blocked by 1 stationary jamming recording |
 | **6** | **Temporal-coherence features (this doc)** | **Null on GroupKFold; −5pt clean recall on the fixed split (`2.1.1`). The one hypothesis half that held — no degraded-reception misfire — is real but not sufficient.** |
 
 The consistent signature: a feature idea looks promising on one evaluation, and a *different*

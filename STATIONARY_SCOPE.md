@@ -6,7 +6,7 @@ as `ROBUSTNESS_NOTES.md` / `CALIBRATION_NOTES.md` / `NORMALIZATION_NOTES.md` /
 
 `SPOOFING_FEATURES.md` ended by rejecting the 11 carrier-phase / L2 / per-constellation
 features: they cleared the rotating-GroupKFold bar but regressed the fixed shipped TEST split
-(jamming recall −9.2pt, clean recall −8.6pt), and the regression was **concentrated entirely
+(jamming recall −9.1pt, clean recall −8.6pt), and the regression was **concentrated entirely
 on the two dynamic (moving-vehicle) recordings** in that split — `1.10.6` (Jamming, dynamic)
 and `3.2.8` (Meaconing, dynamic).
 
@@ -114,7 +114,7 @@ Combined with `SPOOFING_FEATURES.md`:
 | Evaluation | Verdict |
 |---|---|
 | Full dataset, rotating GroupKFold | Features look like a clear improvement (jamming +2.9pt, ROC-AUC +2.1pt), model demonstrably uses them (SHAP + Gini) |
-| Full dataset, fixed shipped TEST split | Features regress hard (jamming −9.2pt, clean −8.6pt), concentrated on dynamic recordings |
+| Full dataset, fixed shipped TEST split | Features regress hard (jamming −9.1pt, clean −8.6pt), concentrated on dynamic recordings |
 | Stationary-only (deployment scope), either evaluation | **Cannot be run** — 1 jamming recording, none can be held out |
 
 **No evaluation available to this project supports integrating the spoofing features.** The
