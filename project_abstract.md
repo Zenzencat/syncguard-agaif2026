@@ -58,16 +58,43 @@ cell tower"), the intended deployment target is the base station itself, so dete
 functioning locally even if the spoofing event also degrades backhaul connectivity.
 
 Since the initial submission, SyncGuard has grown from a batch detector into a running,
-explainable service. A FastAPI scoring endpoint returns, for one telemetry reading, an attack
-probability, a severity normalized to the model's own confidence range, and a per-prediction
-SHAP explanation naming which observables drove the call. A streaming replay mode plays a
-recording through the live scoring path row-by-row over server-sent events, for
-demonstration. On top of the tower network it computes established spatial statistics —
-global and local Moran's I (LISA) via PySAL — to answer whether flagged sites are spatially
-clustered right now. Alert state is debounced with hysteresis so a single threshold flicker
-never raises an alarm. The whole service runs from one `docker compose` command; measured
-end-to-end scoring latency is sub-100 ms at the median (full request over HTTP, SHAP
-explanation included). Endpoints, architecture, and the full evidence trail are in the
+explainable service, packaged as a FastAPI application (`api/main.py`) behind SQLite
+persistence (`api/db.py`) and containerized with Docker — `docker compose up --build` trains
+both model artifacts at image-build time and serves the whole stack from one command. The
+model itself is unchanged: the CV-validated 23-feature RandomForest at decision threshold
+0.52 (clean recall ~0.667, false-positive rate ~0.333, jamming recall ~0.859 on the fixed
+held-out split — full table in §5). What is new is the serving layer around it:
+
+- `POST /score` — scores one telemetry reading and returns an attack probability, a severity
+  normalized to the model's own confidence range, and a per-prediction SHAP explanation naming
+  which observables drove the call; every scored event is persisted to SQLite.
+- `GET /health`, `GET /towers`, `GET /events` — service/model status, the 136 real tower rows,
+  and recently scored events, respectively.
+- A streaming replay mode (`GET /stream/events`, server-sent events) plays a recording through
+  the same live scoring path row-by-row in real recording-time order, for demonstration.
+- On top of the tower network, `GET /spatial/autocorrelation` computes established spatial
+  statistics — global and local Moran's I (LISA) via PySAL — to answer whether flagged sites
+  are spatially clustered right now.
+- Alert state is debounced with hysteresis (3 consecutive above-threshold readings to raise an
+  alert, 5 below to clear it) so a single threshold flicker never raises an alarm.
+- A live dashboard (`GET /dashboard`) consumes these endpoints for the tower map, event log,
+  and per-event explain panel.
+
+SHAP explanation is always computed for `/score`; during streaming replay it is speed-gated —
+computed live at replay speeds up to 20, and available on-demand (cached after first call) via
+`GET /events/{id}/explain` above that speed, so a fast demo replay isn't bottlenecked on
+per-row SHAP. Operational characteristics are measured, not estimated: sub-100 ms p50 /
+sub-135 ms p99 end-to-end scoring latency (full HTTP request, SHAP included), measured replay
+throughput at several requested speeds, and — under concurrent request load during an active
+replay — tail latency (p95/p99) that degrades 3–5x while typical-case (p50) latency stays
+comparatively stable; full numbers in `OPERATIONAL_METRICS.md`.
+
+**Reliability note**: sklearn's RandomForest under parallel inference is not guaranteed to
+return the same prediction twice for a borderline row (floating-point noise near the decision
+boundary) — the serving layer forces single-threaded inference
+(`n_jobs=1`) in `api/model_service.py` so `/score` is deterministic run-to-run, which matters
+for a live judge demo. This is a reliability fix, not a modeling result; full detail in
+`ROBUSTNESS_NOTES.md`. Endpoints, architecture, and the full evidence trail are in the
 repository README.
 
 ## 3. Data Sources
@@ -125,9 +152,15 @@ softened anywhere else this appears (plots, notebooks, or this document):**
 
 - **REAL**: 136 real PT. Telkomsel cellular base-station sites (`site_id`, `site_name`,
   village/district, lat/long, tower type and construction metadata) in Kubu Raya and
-  Pontianak, West Kalimantan, Indonesia — `menaratelepon_ar_50k.csv`, sourced from the AGAIF
-  bootcamp's own Module 6 (AD1002) materials. Verified clean: no missing coordinates, no
-  duplicate coordinates, one coherent region.
+  Pontianak, West Kalimantan, Indonesia — `menaratelepon_ar_50k.csv`. Traced to "Tower
+  Telekomunikasi 50K," Kubu Raya Regency's own Open Data portal
+  (opendata.kuburayakab.go.id) — a public Indonesian government open-data platform — and
+  supplied to this project via the AGAIF bootcamp's Module 6 (AD1002) materials. The
+  portal's own listing leaves its license field blank, so this is publicly published
+  government infrastructure data, not data under a confirmed open license such as CC-BY; it
+  is included in this repository because it is a public download from a government
+  transparency portal, not because redistribution rights have been formally confirmed.
+  Verified clean: no missing coordinates, no duplicate coordinates, one coherent region.
 - **REAL**: the severity *scale* is anchored to the detector's own `predict_proba()` output on
   the held-out set — not invented numbers: **floor 0.430** (median probability on true clean
   rows), **ceiling 0.993** (90th-percentile probability on true attack rows). The same two
@@ -138,7 +171,11 @@ softened anywhere else this appears (plots, notebooks, or this document):**
   severities, not a custom metric. The one element it inherits from the SIMULATED side is the
   same one labelled below: which physical tower each scored event is attributed to
   (deterministic round-robin — the dataset is a single receiver with no real per-tower
-  mapping). Every API response and stored row states this.
+  mapping). Every API response and stored row states this. **Framed plainly**: because
+  per-event tower attribution is simulated, any specific Moran's I value the service reports
+  reflects that simulated attribution, not a measured real-world spatial pattern — we
+  demonstrate the method that would surface real clusters once real per-tower data exists, we
+  do not claim to have detected a real cluster.
 - **SIMULATED**: everything about *where* an attack originates and *how* it spreads. No
   public dataset of real ASEAN base-station GNSS timing under spoofing exists (same gap
   as above), so there is no measured spread to show. Instead, one real tower site (the one
@@ -250,7 +287,22 @@ configurations; a gain on one evaluation is broken by a different recording on t
 **The ceiling is a data-diversity limit, not a modelling gap, and we can name what would raise
 it:** more recordings, more power/band configurations per attack type, and stationary
 base-station telemetry specifically. Full evidence trail — six experiments across seven
-dedicated notes files — is in the repository.
+dedicated notes files (`ROBUSTNESS_NOTES.md`, `CALIBRATION_NOTES.md`, `NORMALIZATION_NOTES.md`,
+`GBM_COMPARISON.md`, `SPOOFING_FEATURES.md`, `STATIONARY_SCOPE.md`, `TEMPORAL_COHERENCE.md`) —
+is in the repository.
+
+**What we tried and why it's not in the model.** One of the six angles (`SPOOFING_FEATURES.md`)
+went looking for spoofing-specific physics in observables the standard extraction pipeline
+discards — per-satellite L2-tracking collapse, cross-constellation C/N0 divergence, and related
+dual-frequency structure, mined from the raw `rinex.csv` per-satellite records rather than the
+aggregated per-epoch table the shipped 23 features are built from. On a rotating GroupKFold
+evaluation these held up (jamming +2.9pt, ROC +2.1pt). They did not survive the fixed shipped
+TEST split — a 9.1pt jamming-recall and 8.6pt clean-recall regression, concentrated on two
+dynamic, degraded-reception recordings — so they were reverted and are **not** part of the
+shipped model. We state this as a finding, not a shipped feature: we found evidence that richer
+spoofing-specific signal exists in observables the standard pipeline discards; it didn't survive
+our fixed validation split, so it's not in the shipped model, but it changes what we believe the
+ceiling is if more data becomes available.
 
 **Scope of claim**: these results demonstrate detectability of jamming/spoofing/meaconing
 signatures in real GNSS-receiver observables at a controlled test range. They do not yet

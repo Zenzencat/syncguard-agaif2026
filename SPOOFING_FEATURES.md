@@ -316,8 +316,8 @@ carrier-phase/L2/per-constellation structure is genuine — but neither is suffi
   `spoofing_lean_check.py` — implementations.
 - `processed/spoofing_features_supplement.parquet` — supplementary features (gitignored like
   the rest of `processed/` except the committed base parquet — regenerate by re-running the
-  extractor; needs the raw scenario tree, located via `$SYNCGUARD_RAW_ROOT` / `raw/` /
-  `../agaif-materials/dataset/raw`).
+  extractor; needs the raw scenario tree, located via `$SYNCGUARD_RAW_ROOT` or `raw/` at the
+  repo root — see the main README's "Data" section).
 - `processed/spoofing_comparison_shipped_tbl.csv`, `spoofing_comparison_best_tbl.csv`,
   `spoofing_shap_ranking.csv`, `spoofing_gini_ranking.csv` — the tables above.
 - Does **not** modify `models/model.joblib`, `models/model_baseline.joblib`,

@@ -213,8 +213,8 @@ data (more recordings, more configurations per attack type), not more features.
 ## Where this lives
 
 - `extract_temporal_features.py` — the 5-feature supplementary extractor (slip-aware arcs,
-  causal trailing windows). Needs the raw scenario tree (`$SYNCGUARD_RAW_ROOT` / `raw/` /
-  `../agaif-materials/dataset/raw`).
+  causal trailing windows). Needs the raw scenario tree (`$SYNCGUARD_RAW_ROOT` or `raw/` at
+  the repo root — see the main README's "Data" section).
 - `temporal_coherence_experiment.py` — the dual evaluation (GroupKFold + fixed split +
   per-recording breakdown + SHAP).
 - `temporal_feasibility_probe{1,2,3}.py` — the Step-0 probes behind the hypothesis split

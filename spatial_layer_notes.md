@@ -25,8 +25,12 @@ names, not in plot titles, not in prose. Concretely:
 
 ## What is REAL
 
-**Source**: `menaratelepon_ar_50k.csv`, from the bootcamp's Module 6 (AD1002) materials —
-`agaif-materials/downloads/Module 6_AD1002_Dataset (Tower).zip`.
+**Source**: `menaratelepon_ar_50k.csv` — "Tower Telekomunikasi 50K" on Kubu Raya Regency's own
+Open Data portal (opendata.kuburayakab.go.id), supplied to this project via the bootcamp's
+Module 6 (AD1002) materials. Committed in-repo at
+`spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv` (see `project_abstract.md`
+§3 and `README.md` for the licensing note — the portal's license field is blank, so this is
+public government data, not confirmed-open-license data).
 
 - **Country/region**: Indonesia — Kubu Raya and Pontianak, West Kalimantan (Kalimantan
   Barat).
@@ -112,7 +116,8 @@ activated per the main README):
 python build_spatial_simulation.py
 ```
 Runs in well under a minute (headless `Agg` backend, no network calls, no live geocoding —
-the tower CSV already has lat/long), but requires `processed/syncguard_features.parquet`
+the tower CSV already has lat/long). Requires `processed/syncguard_features.parquet`
 (from `extract_features.py`) and the real tower CSV noted above, at
-`spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv` — neither is included
-in this repo (see the main README's "Spatial layer" section).
+`spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv` — both are committed
+in this repo so the script runs out of the box (see the main README's "Spatial layer" section
+and the licensing note in `project_abstract.md` §3).
