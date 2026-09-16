@@ -143,8 +143,63 @@ are reported together, not just the global headline number — LISA is what actu
 "which neighbouring stations are correlated," and can say so even when the one-number network
 summary doesn't yet.
 
+## Deck headline number correction (was 0.686, now re-derived honestly)
+
+An earlier version of the pitch deck's GeoAI slide (Slide 8) quoted **Global Moran's I =
+0.686, p < 0.01, 65/136 towers in a significant cluster**, captioned as "computed live during
+replay" with SIMULATED round-robin tower attribution — the same framing this document uses
+for `api/spatial_stats.py`. That number did not actually come from that mechanism. It came
+from `build_spatial_autocorrelation_demo.py`, a separate offline script that computed Moran's
+I directly over `spatial_processed/simulated_spatial_anomaly_SIMULATED.csv` — the
+epicenter-and-distance-decay SIMULATED severity layer behind Slide 7's static map (see
+`spatial_layer_notes.md`), not a live replay's round-robin-attributed events at all.
+
+That input is a smooth, monotonically decaying function of real distance from one fixed
+epicenter (confirmed: `corr(distance_from_epicenter_km, simulated_anomaly_severity_SIMULATED)
+= -0.45` across all 136 towers, computed directly from the CSV). Feeding a smooth function of
+real distance into a spatial-autocorrelation test whose neighbor weights are built from those
+same real distances produces a strong positive Moran's I close to a mathematical certainty —
+nearby towers get near-identical severity by construction. It demonstrates that a spatially
+smooth input looks spatially smooth; it does not demonstrate anything about the round-robin
+mechanism the slide actually described, which is close to random and has no structural reason
+to produce clustering.
+
+**Re-derived honestly**: `build_spatial_autocorrelation_live_demo.py` reuses the exact
+production classes `api.main`'s live replay uses — `ModelService`, `TowerAttributor` (real
+round-robin), `EventStore`, and this module's own `compute_autocorrelation` — and replays the
+full Spoofing/2.1.1 recording (2,503 rows, the same scenario as the Slide 11 demo) once,
+fresh, start to finish. Result, after all 136 towers had a scored event:
+
+```
+global_moran_i: -0.0378   p_value: 0.2610   z_score: -0.6511   expected_i: -0.0074
+significant LISA towers: 17 / 136  (3 High-High, 4 Low-Low, 5 High-Low, 5 Low-High)
+```
+
+**Not statistically significant** (p=0.261, comfortably above α=0.05) — no detectable global
+spatial clustering. Checkpoints through the same replay (rows 136 / 272 / 500 / 1000 / 1500 /
+2000) ranged from I=-0.089 (p=0.039, significant dispersion) to I=+0.049 (p=0.132, not
+significant), swinging sign multiple times — consistent with round-robin attribution being
+close to random and having no structural relationship to real tower geometry, unlike the
+epicenter-decay layer above. Full checkpoint log:
+`spatial_processed/live_replay_autocorrelation_result_LIVE.txt`; plots:
+`spatial_processed/lisa_cluster_map_LIVE.png`, `spatial_processed/moran_scatter_LIVE.png`.
+
+**This is the number the deck now uses**, and the honest reading is the argument for the next
+step, not a caveat to bury: the method (KNN weights, global/local Moran's I) is real and
+ready. Round-robin attribution has no reason to produce a real pattern, so it doesn't — which
+is exactly why real per-tower attribution data is the thing that would let this method say
+something meaningful. `build_spatial_autocorrelation_demo.py` and its
+`*_SIMULATED.png` outputs remain in the repo (still correctly labeled `SIMULATED`, and its own
+docstring was already honest about its input) but must not be used as the source of a
+"live replay" claim — that mismatch is what happened here.
+
 ## Where this lives
 
+- `build_spatial_autocorrelation_live_demo.py` — reproduces the deck's headline Slide 8
+  number: a genuine, fresh, once-run live replay through the real `ReplayManager` mechanism
+  (`ModelService`, `TowerAttributor` round-robin, `EventStore`, this module's
+  `compute_autocorrelation`). Rerun it to reproduce `spatial_processed/*_LIVE.*`. See "Deck
+  headline number correction" above.
 - `api/spatial_stats.py` — full implementation (weights, global/local Moran's I, LISA
   classification, the REAL/SIMULATED statement in the module docstring).
 - `GET /spatial/autocorrelation` (`api/main.py`) — returns global I/p-value/z-score and the

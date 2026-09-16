@@ -8,18 +8,20 @@ structure, numbers, and pacing have all changed.
 **Target slot**: ~7 minutes (confirmed). **Target spoken length**: 5:30–6:30, with real
 buffer under the cap.
 
-**Word count**: 823 words (main narration, slides only — excludes Q&A prep; counted directly
-from this file, word by word, not estimated).
+**Word count**: 840 words (main narration, slides only — excludes Q&A prep; counted directly
+from this file, word by word, not estimated). Updated after Slide 8 was re-derived from a
+genuine live replay (was 823 words / 0.686 headline figure; see Slide 8 and Q&A #7 below for
+why that number changed).
 **Pacing math** (130–150 wpm, natural speaking pace — not the old `[~Xs]` tags, which were
 carried over from the 12-slide version and already found to be off by ~40%):
 
 | Pace | Runtime |
 |---|---|
-| 130 wpm (slow) | 6:20 |
-| 140 wpm (mid) | 5:53 |
-| 150 wpm (brisk) | 5:29 |
+| 130 wpm (slow) | 6:28 |
+| 140 wpm (mid) | 6:00 |
+| 150 wpm (brisk) | 5:36 |
 
-Sits inside the 5:30–6:30 target across nearly the whole pace range, with ~40s of buffer to
+Sits inside the 5:30–6:30 target across nearly the whole pace range, with ~32s of buffer to
 the 7:00 cap even at the slow end — real margin, not a knife's edge.
 
 ---
@@ -95,15 +97,16 @@ lands and which sites to prioritize first.
 
 ## Slide 8 — Live Spatial Statistics (NEW): Clustered, or Just Coincidence
 
-*(~95 words · ~41s)*
+*(~100 words · ~43s)*
 
-This is where GeoAI comes in properly. We compute Global and Local Moran's I — LISA — live,
-over the real tower network, using real k-nearest-neighbor weights: established methods going
-back to Moran in 1950 and Anselin's LISA in 1995. It answers whether flagged sites are
-actually clustered right now, or just scattered noise. This run: Global Moran's I of 0.686, p
-under 0.01 — 65 of 136 towers in a significant cluster. The honest caveat: which tower each
-event attributes to is currently simulated, round-robin — so this demonstrates the method,
-not a detected real-world cluster.
+This is where GeoAI comes in properly. We compute Global and Local Moran's I — LISA — over
+the real tower network, using real k-nearest-neighbor weights: established methods going back
+to Moran in 1950 and Anselin's LISA in 1995. We ran it fresh, on a full live replay, real
+round-robin attribution and all. The honest result: Global Moran's I of negative 0.04 — not
+statistically significant. No detectable clustering. That's expected: round-robin attribution
+is close to random, so it has no structural reason to produce one. And that's the real
+argument for step one of our roadmap — with genuine per-tower attribution data, this same
+ready, real method would have something real to detect.
 
 ## Slide 9 — Innovation: Why This Approach
 
@@ -230,34 +233,31 @@ stable local neighborhood, small enough to stay genuinely local rather than smoo
 the whole network. It's also what most cellular-tower and spatial-epidemiology LISA studies
 actually use, since towers are placed by coverage and demand, not on a grid.
 
-**7. Why 0.686 — what does that magnitude mean, and does the significance meaningfully hold
-given the simulated per-tower attribution?**
+**7. Your Moran's I here is close to zero and not statistically significant — doesn't that
+undercut the spatial-statistics slide?**
 
-Moran's I is bounded roughly between -1 and 1. Near zero means no spatial pattern; positive
-means similar values cluster together; negative means checkerboard-like dispersion. 0.686 is
-a strong positive value — for comparison, other snapshots from the same live system have
-shown values as low as 0.019, or even a significant negative dispersion around -0.09. So
-0.686 sits well up toward the clustered end of that range: this run's severity assignment is
-far from randomly scattered across the real tower geometry.
+No — it's the honest result, and we want to be upfront about how we got here. An earlier
+internal draft of this slide quoted a much higher, significant-looking number, computed
+offline from `simulated_spatial_anomaly_SIMULATED.csv` — the epicenter-and-distance-decay
+layer behind our tower-spread map, not a live replay at all. That severity is a smooth,
+decaying function of real distance from one fixed point, so feeding it into a
+spatial-autocorrelation test built on those same real distances all but guarantees a strong
+positive number — it confirms the input is spatially smooth, it doesn't detect anything. We
+caught that mismatch before finalizing and re-ran the number the way the slide always claimed
+to generate it: a full, fresh live replay through the real round-robin attribution mechanism.
+The honest output is Global Moran's I of -0.04, p=0.26 — not significant. Round-robin
+attribution is close to random, so it has no structural reason to produce clustering, and it
+didn't. That's not a weaker slide — it's a more truthful one.
 
-On significance: p<0.01 comes from 999 permutation tests — fewer than 1% of random
-reassignments of these exact severity values across this exact tower geometry produced as
-extreme an I. That's a real, valid statistical result about this input. What it can't tell
-you is whether that input reflects a real spoofing event, because the tower attribution
-feeding it is simulated. The significance test is honest about the pattern in the data we
-gave it — it just can't certify that the data itself is a real-world observation.
+**8. Does this result depend on the epicenter-choice assumption, or would it hold under a
+different simulated attribution?**
 
-**8. Does this spatial-clustering result depend on the epicenter-choice assumption, or would
-it hold under a different simulated attribution?**
-
-Good distinction — these are actually two separate simulated components in two different
-parts of the deck. The static tower map on the spread slide uses the epicenter-and-decay
-simulation. The live Moran's I number comes from a different mechanism: round-robin
-attribution of scored events to towers during replay, which doesn't use the epicenter at all.
-So no, this result doesn't depend on the epicenter choice. It does depend on the round-robin
-attribution, and that's exactly why the number moves between runs — our own documentation
-shows a dispersion result of -0.091 in one snapshot and a weak 0.019 in another, from the same
-live system. Different simulated attribution sequences will produce different Global Moran's
-I values and different cluster memberships. That variability is expected, not a bug — it's
-why the slide says "this run" explicitly and frames it as a demonstration of the method, not
-a claim about a specific detected pattern.
+It doesn't depend on the epicenter at all — this number comes from round-robin attribution
+only, a completely separate mechanism from the epicenter-and-decay simulation on the tower-map
+slide. We can show it's sensitive to attribution, though: we logged Global Moran's I at several
+checkpoints through the same replay, and it swung from -0.089 (briefly significant dispersion)
+to +0.049 (not significant) and back, multiple sign changes over one recording. That
+volatility is exactly what you'd expect from an assignment mechanism with no structural
+relationship to real tower geometry — it's further evidence the round-robin result is honest
+noise, not a hidden pattern, and it's the direct argument for why real per-tower attribution
+data is the thing that would let this same, real method actually find something.

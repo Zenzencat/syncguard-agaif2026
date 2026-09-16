@@ -1,0 +1,33 @@
+SyncGuard -- genuine live-replay Global/Local Moran's I (Slide 8 headline number)
+Produced by build_spatial_autocorrelation_live_demo.py -- rerun this script to reproduce.
+
+run_id: Spoofing\stationary\Medium Power (_1W)\Bands_L1_L2_L5\2.1.1
+n_rows_replayed: 2503
+
+Checkpoints (Global Moran's I as the replay progresses):
+  row   136: I=-0.0592  p=0.1430  z=-1.039  sig_LISA=8
+  row   272: I=-0.0890  p=0.0390  z=-1.652  sig_LISA=16
+  row   500: I=+0.0283  p=0.2280  z=+0.704  sig_LISA=19
+  row  1000: I=-0.0787  p=0.0610  z=-1.444  sig_LISA=5
+  row  1500: I=+0.0487  p=0.1320  z=+1.134  sig_LISA=23
+  row  2000: I=-0.0143  p=0.4640  z=-0.166  sig_LISA=20
+  row  2503: I=-0.0378  p=0.2610  z=-0.651  sig_LISA=17
+
+Final state (all 136 towers scored):
+  global_moran_i: -0.0378
+  p_value: 0.2610
+  z_score: -0.6511
+  expected_i: -0.0074
+  significant LISA towers: 17 / 136
+    Low-High (spatial outlier): 5
+    High-Low (spatial outlier): 5
+    Low-Low (coldspot): 4
+    High-High (hotspot): 3
+
+Interpretation: not statistically significant at alpha=0.05 (p > 0.05) -- no
+detectable global spatial clustering under round-robin attribution. This is the
+expected result: round-robin cycles through towers independent of severity, so it
+has no structural reason to produce spatial clustering the way the epicenter-decay
+simulation (Slide 7 / build_spatial_simulation.py) does by construction. It is the
+honest argument for why real per-tower attribution is the necessary next step --
+the method is real and ready; only the input needs to stop being simulated.
