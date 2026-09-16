@@ -287,11 +287,24 @@ spatial coherence. Both the strength of the result and this caveat belong on the
 — exactly as plainly as the round-robin correction states its own caveat, not less. Only real
 per-tower attribution data would settle which (if either) reading is correct.
 
+**The meta-finding**: three different attribution mechanisms were tried for this slide across
+this project's history, and each was undone by a *different structural artifact of the
+mechanism itself* — never a data-quality problem. The offline epicenter-decay CSV guaranteed a
+strong positive Moran's I because severity was a smooth function of the same real distances
+used as the test's own neighbor weights. Round-robin guaranteed a near-zero result because it's
+memoryless, with no structural link to real geometry at all. Spatially-persistent attribution
+produced an apparently strong result contaminated by this recording's own real temporal
+autocorrelation (lag-1 r=0.99) leaking through the walk's time-to-space design. That pattern is
+itself the finding: no synthetic attribution heuristic can cleanly test spatial clustering
+here — this requires real per-event ground truth to resolve, exactly what step one of the pilot
+roadmap targets.
+
 Full results and reproducibility log:
 `spatial_processed/persistent_replay_autocorrelation_result_LIVE.txt`; plots:
-`spatial_processed/lisa_cluster_map_PERSISTENT.png`,
-`spatial_processed/moran_scatter_PERSISTENT.png` (the scatter plot renders both the real-order
-line and the shuffled-control line together, for direct visual comparison).
+`spatial_processed/moran_scatter_PERSISTENT.png` — **use this one for the slide** — it renders
+both the real-order line and the shuffled-control line together, making the confound visible
+without relying on the caption alone; `spatial_processed/lisa_cluster_map_PERSISTENT.png` is
+the per-tower map, kept for reference but not the recommended slide image.
 
 ## Where this lives
 

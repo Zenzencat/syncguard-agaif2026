@@ -8,30 +8,42 @@ structure, numbers, and pacing have all changed.
 **Target slot**: ~7 minutes (confirmed). **Target spoken length**: 5:30–6:30, with real
 buffer under the cap.
 
-**Word count**: 863 words (main narration, slides only — excludes Q&A prep; counted directly
-from this file, word by word, not estimated). History: 823 words / 0.686 headline (offline
-mismatch) → 840 words / -0.04 (round-robin, honestly re-derived) → 863 words / spatially-persistent
-attribution (0.59–0.78, with its own control-test caveat) — see Slide 8 and Q&A #7–8 below.
+**Word count**: 865 words (main narration, slides only — excludes Q&A prep, which is only
+spoken if a judge asks; counted directly from this file, word by word, not estimated).
+History: 823 words / 0.686 headline (offline mismatch) → 840 words / -0.04 (round-robin,
+honestly re-derived) → 890 words / spatially-persistent attribution (0.59–0.78, with its own
+control-test caveat) → 865 words after trimming Slides 2, 5, 6, 9, 12, 13 to make room for the
+meta-finding synthesis added to Slide 8 (see Slide 8 and Q&A #7–8 below) without cutting any
+honesty content. **Recount methodology note**: this pass caught that our word counts back
+through the 823-word version were computed with `wc -w`, which silently misparses em-dashes
+under this environment's POSIX/C locale (verified directly — confirmed to undercount by
+~4% on this file); recounted here with a locale-independent method that also excludes
+bare punctuation tokens (a lone "—" isn't a spoken word). The correction moved the reported
+total by about 1 word overall — the earlier figures were coincidentally close, not reliably
+so, and shouldn't be trusted as a coincidence going forward.
 **Pacing math** (130–150 wpm, natural speaking pace — not the old `[~Xs]` tags, which were
 carried over from the 12-slide version and already found to be off by ~40%):
 
 | Pace | Runtime |
 |---|---|
-| 130 wpm (slow) | 6:38 |
-| 140 wpm (mid) | 6:10 |
-| 150 wpm (brisk) | 5:45 |
+| 130 wpm (slow) | 6:39 |
+| 140 wpm (mid) | 6:11 |
+| 150 wpm (brisk) | 5:46 |
 
-Sits inside, or just at the edge of, the 5:30–6:30 target depending on pace, with ~22s of
-buffer to the 7:00 cap even at the slow end. Slide 8 is now the single densest slide in the
-deck (mechanism + primary result + control result in ~105 words) — if the 7-minute slot ever
-feels tight in a run-through, that's the one section with room to trim, by shortening the
-control-test explanation to "a control test confirms this" without restating the mechanism.
+Sits inside, or just at the edge of, the 5:30–6:30 target depending on pace, with ~21s of
+buffer to the 7:00 cap even at the slow end — real margin, not a knife's edge, but tighter
+than earlier versions. Slide 8 is now the single densest slide in the deck by a wide margin
+(mechanism + primary result + control result + the three-mechanism synthesis, ~160 words,
+~69s at 140wpm) — if the 7-minute slot ever feels tight in a run-through, that's the one
+section with room to trim, by shortening the control-test explanation to "a control test
+confirms this" or folding the synthesis into one sentence, without cutting the honesty
+content itself.
 
 ---
 
 ## Slide 1 — Title
 
-*(~32 words · ~14–15s)*
+*(~33 words · ~14s)*
 
 Hi — we're Team Lorem Ipsum from Thailand. This is SyncGuard, our AGAIF 2026 Cybersecurity
 track entry: a GNSS spoofing detector built to protect the timing that keeps 4G and 5G base
@@ -39,18 +51,17 @@ stations synchronized.
 
 ## Slide 2 — The Problem: An Invisible Attack on Network Time
 
-*(~70 words · ~30s)*
+*(~68 words · ~29s)*
 
 4G and 5G base stations depend on GNSS for precise timing. Spoofing feeds a receiver
 fabricated signals and corrupts that timing silently — no alarm, just frame misalignment,
-handover failures, and interference downstream — hitting hardest where network redundancy is
-thinnest. And it's not hypothetical: GPS/GNSS signal-loss events in aviation are up 220% from
-2021 to 2024, per a joint EASA–IATA plan — a proxy for the same pressure now reaching telecom
-timing on the ground.
+handover failures, and interference downstream — hitting hardest where redundancy is
+thinnest. GPS/GNSS signal-loss events in aviation are up 220% from 2021 to 2024, per a joint
+EASA–IATA plan — a proxy for the same pressure now reaching telecom timing on the ground.
 
 ## Slide 3 — The Solution: Retrofit-First Spoofing Detection
 
-*(~55 words · ~24s)*
+*(~54 words · ~23s)*
 
 SyncGuard is a lightweight anomaly-detection layer that watches a base station's existing
 GNSS receiver — signal quality, Doppler behavior, RF interference — and flags an attack in
@@ -60,7 +71,7 @@ SyncGuard works with what's already installed.
 
 ## Slide 4 — Technical Workflow: How It Works
 
-*(~55 words · ~24s)*
+*(~49 words · ~21s)*
 
 Here's the pipeline. Raw receiver observables — C/N0, Doppler, RF-monitor stats — become
 features every epoch, get scored by a RandomForest classifier, and fire an alert locally, in
@@ -69,27 +80,27 @@ backhaul to the network core degrades too.
 
 ## Slide 5 — Data Source: Real Attack Data, Not Simulation
 
-*(~65 words · ~28s)*
+*(~62 words · ~27s)*
 
 None of this is simulated data. We used JammerTest 2024 — real u-blox receiver logs from a
 controlled test range in Norway: 24 scenarios, jamming through combined attacks, 44,639
-epochs. We're upfront about scope, though: this is test-range receiver data, not production
-base-station telemetry. That receiver-level detection generalizes to base-station timing is a
-stated assumption here — no public base-station spoofing dataset exists to prove it directly.
+epochs. We're upfront about scope: test-range receiver data, not production base-station
+telemetry. That receiver-level detection generalizes to base-station timing is a stated
+assumption here — no public base-station spoofing dataset exists to prove it directly.
 
 ## Slide 6 — GeoAI Methods: Features, Model, and a Split That Doesn't Cheat
 
-*(~65 words · ~28s)*
+*(~58 words · ~25s)*
 
 On modeling: we engineer signal-quality and consistency features — C/N0 stats, Doppler shift,
 code-Doppler residuals, RF-monitor stats — pure Python. A 300-tree, class-weight-balanced
-RandomForest handles the 77/23 attack-clean imbalance. Critically, we split by recording, not
-by row — eight of twenty-four held out entirely, one dynamic and one stationary per attack
-type — so the model is tested on attacks it's genuinely never seen.
+RandomForest handles the 77/23 attack-clean imbalance. We split by recording, not row — eight
+of twenty-four held out entirely, one dynamic and one stationary per attack type — so the
+model is tested on attacks it's genuinely never seen.
 
 ## Slide 7 — Spatial Layer (NEW): Where It Spreads, Who to Prioritize
 
-*(~75 words · ~32s)*
+*(~74 words · ~32s)*
 
 Beyond detection, we map it. This is 136 real Telkomsel towers across Kubu Raya and
 Pontianak, Indonesia — and the severity scale is real too, anchored directly to our
@@ -100,7 +111,7 @@ lands and which sites to prioritize first.
 
 ## Slide 8 — Live Spatial Statistics (NEW): Clustered, or Just Coincidence
 
-*(~105 words · ~45s)*
+*(~160 words · ~69s)*
 
 This is where GeoAI comes in properly. We compute Global and Local Moran's I — LISA — over
 the real tower network, using real k-nearest-neighbor weights: established methods going back
@@ -110,21 +121,23 @@ a real nearest neighbor. One real assumption: sustained attacks drift locally, t
 teleport. Result: Moran's I from 0.59 to 0.78 across three runs, p equals 0.001, stable and
 significant. But a control test — same walk, severities shuffled out of real order — collapsed
 it to negative 0.08. So the strong number is mostly this recording's own real temporal
-autocorrelation, funneled through the walk, not confirmed spatial spread. Only real per-tower
-data settles this for good.
+autocorrelation, funneled through the walk, not confirmed spatial spread. Zoom out: three
+attribution mechanisms, three different structural artifacts — never a data problem. That
+pattern is the real finding. It takes real per-event data to settle this, which is exactly
+step one of our roadmap.
 
 ## Slide 9 — Innovation: Why This Approach
 
-*(~50 words · ~22s)*
+*(~41 words · ~18s)*
 
 Why this approach? Three reasons. Retrofit, not replace — no crypto-auth hardware upgrade
 needed. A statistical signature, not a cryptographic check — the attack's fingerprint in the
-receiver's own data. And edge-deployable — it keeps running at the cell site even when the
-attack degrades backhaul too.
+receiver's own data. Edge-deployable — it keeps running at the cell site even if backhaul
+degrades too.
 
 ## Slide 10 — Prototype Evidence: 87.7% Accuracy on Held-Out Attacks
 
-*(~55 words · ~24s)*
+*(~47 words · ~20s)*
 
 Does it work? On eight held-out recordings the model never trained on: 87.7% accuracy,
 ROC-AUC 0.916, PR-AUC 0.968. Attack recall is 93.7% overall, up to 98.5% for combined
@@ -133,7 +146,7 @@ ever saw a row of it.
 
 ## Slide 11 — Show, Don't Tell: Watch It Catch a Live Spoof
 
-*(~55 words · ~24s)*
+*(~52 words · ~22s)*
 
 Let's watch it catch one live — scenario 2.1.1, a held-out, stationary spoofing attack the
 model never saw in training. Red is the true spoofing window; purple is what the model flags.
@@ -142,28 +155,28 @@ tracks it, and clears right after.
 
 ## Slide 12 — Honest Limitations: Where It Still Needs Work
 
-*(~70 words · ~30s)*
+*(~61 words · ~26s)*
 
 Two things we're not hiding. Clean recall, at 66.7%, trails attack recall's 93.7% — likely
-per-session noise-floor drift, not a feature-set flaw. And feature importance still leans on
-generic RF-monitor fields over our purpose-built spoofing features — you can see it in the
-ranking. Both are concrete next steps, not dead ends. And to be clear: this is validated on
-test-range data, not yet production telemetry — that's future work.
+per-session noise-floor drift, not a feature flaw. Feature importance still leans on generic
+RF-monitor fields over our purpose-built spoofing features — visible in the ranking. Both are
+next steps, not dead ends. To be clear: this is validated on test-range data, not production
+telemetry yet — that's future work.
 
 ## Slide 13 — Implementation Plan: From Test Range to Pilot
 
-*(~75 words · ~32s)*
+*(~62 words · ~27s)*
 
 The path to a pilot: validate against a real operator's base-station logs; field-validate and
 tune thresholds per site; confirm edge-deployment feasibility; phase in rollout with
-four-dimension monitoring — health, data validity, model performance, drift; then a
-documentation and provenance handoff. It's sustainable by design too — retrofit-first avoids
-a hardware refresh, edge deployment keeps the footprint low, and open-source Python keeps the
-barrier to reproduction low across unevenly-resourced markets.
+four-dimension monitoring — health, data validity, model performance, drift; then
+documentation and provenance handoff. Sustainable by design too — retrofit-first avoids a
+hardware refresh, edge deployment keeps the footprint low, and open-source Python keeps
+reproduction affordable across under-resourced markets.
 
 ## Slide 14 — Closing: Protecting the Timing Everything Else Depends On
 
-*(~45 words · ~20s)*
+*(~44 words · ~19s)*
 
 Trustworthy GNSS timing is the precondition for every hazard-response and predictive system
 built on network telemetry — SyncGuard protects that precondition, rather than sitting on top
