@@ -8,21 +8,24 @@ structure, numbers, and pacing have all changed.
 **Target slot**: ~7 minutes (confirmed). **Target spoken length**: 5:30–6:30, with real
 buffer under the cap.
 
-**Word count**: 840 words (main narration, slides only — excludes Q&A prep; counted directly
-from this file, word by word, not estimated). Updated after Slide 8 was re-derived from a
-genuine live replay (was 823 words / 0.686 headline figure; see Slide 8 and Q&A #7 below for
-why that number changed).
+**Word count**: 863 words (main narration, slides only — excludes Q&A prep; counted directly
+from this file, word by word, not estimated). History: 823 words / 0.686 headline (offline
+mismatch) → 840 words / -0.04 (round-robin, honestly re-derived) → 863 words / spatially-persistent
+attribution (0.59–0.78, with its own control-test caveat) — see Slide 8 and Q&A #7–8 below.
 **Pacing math** (130–150 wpm, natural speaking pace — not the old `[~Xs]` tags, which were
 carried over from the 12-slide version and already found to be off by ~40%):
 
 | Pace | Runtime |
 |---|---|
-| 130 wpm (slow) | 6:28 |
-| 140 wpm (mid) | 6:00 |
-| 150 wpm (brisk) | 5:36 |
+| 130 wpm (slow) | 6:38 |
+| 140 wpm (mid) | 6:10 |
+| 150 wpm (brisk) | 5:45 |
 
-Sits inside the 5:30–6:30 target across nearly the whole pace range, with ~32s of buffer to
-the 7:00 cap even at the slow end — real margin, not a knife's edge.
+Sits inside, or just at the edge of, the 5:30–6:30 target depending on pace, with ~22s of
+buffer to the 7:00 cap even at the slow end. Slide 8 is now the single densest slide in the
+deck (mechanism + primary result + control result in ~105 words) — if the 7-minute slot ever
+feels tight in a run-through, that's the one section with room to trim, by shortening the
+control-test explanation to "a control test confirms this" without restating the mechanism.
 
 ---
 
@@ -97,16 +100,18 @@ lands and which sites to prioritize first.
 
 ## Slide 8 — Live Spatial Statistics (NEW): Clustered, or Just Coincidence
 
-*(~100 words · ~43s)*
+*(~105 words · ~45s)*
 
 This is where GeoAI comes in properly. We compute Global and Local Moran's I — LISA — over
 the real tower network, using real k-nearest-neighbor weights: established methods going back
-to Moran in 1950 and Anselin's LISA in 1995. We ran it fresh, on a full live replay, real
-round-robin attribution and all. The honest result: Global Moran's I of negative 0.04 — not
-statistically significant. No detectable clustering. That's expected: round-robin attribution
-is close to random, so it has no structural reason to produce one. And that's the real
-argument for step one of our roadmap — with genuine per-tower attribution data, this same
-ready, real method would have something real to detect.
+to Moran in 1950 and Anselin's LISA in 1995. We also upgraded attribution — from memoryless
+round-robin to a spatially-persistent walk: stay put seventy percent of the time, else move to
+a real nearest neighbor. One real assumption: sustained attacks drift locally, they don't
+teleport. Result: Moran's I from 0.59 to 0.78 across three runs, p equals 0.001, stable and
+significant. But a control test — same walk, severities shuffled out of real order — collapsed
+it to negative 0.08. So the strong number is mostly this recording's own real temporal
+autocorrelation, funneled through the walk, not confirmed spatial spread. Only real per-tower
+data settles this for good.
 
 ## Slide 9 — Innovation: Why This Approach
 
@@ -231,33 +236,40 @@ guarantees every tower exactly k neighbors regardless of local density. k=5 is a
 middle value in the LISA literature — typically 4 to 8 for point data — large enough for a
 stable local neighborhood, small enough to stay genuinely local rather than smoothing over
 the whole network. It's also what most cellular-tower and spatial-epidemiology LISA studies
-actually use, since towers are placed by coverage and demand, not on a grid.
+actually use, since towers are placed by coverage and demand, not on a grid. Our attribution
+walk's own "move to a nearest neighbor" step also happens to use k=5 — same conventional
+value, same reasoning, but it's an unrelated parameter of a different mechanism; changing one
+doesn't imply changing the other.
 
-**7. Your Moran's I here is close to zero and not statistically significant — doesn't that
-undercut the spatial-statistics slide?**
+**7. That's a strong, significant number (I up to 0.78, p=0.001) — is that a real finding?**
 
-No — it's the honest result, and we want to be upfront about how we got here. An earlier
-internal draft of this slide quoted a much higher, significant-looking number, computed
-offline from `simulated_spatial_anomaly_SIMULATED.csv` — the epicenter-and-distance-decay
-layer behind our tower-spread map, not a live replay at all. That severity is a smooth,
-decaying function of real distance from one fixed point, so feeding it into a
-spatial-autocorrelation test built on those same real distances all but guarantees a strong
-positive number — it confirms the input is spatially smooth, it doesn't detect anything. We
-caught that mismatch before finalizing and re-ran the number the way the slide always claimed
-to generate it: a full, fresh live replay through the real round-robin attribution mechanism.
-The honest output is Global Moran's I of -0.04, p=0.26 — not significant. Round-robin
-attribution is close to random, so it has no structural reason to produce clustering, and it
-didn't. That's not a weaker slide — it's a more truthful one.
+We don't think so, and we ran the test that would tell us. This slide already went through one
+honest correction: an earlier internal draft quoted a number computed offline from a smooth,
+distance-decay severity layer, which all but guaranteed a strong positive result by
+construction — not a finding. We fixed that by re-deriving from a genuine live replay, which
+originally used round-robin attribution and came back honestly weak: -0.04, not significant.
+The number on the slide now comes from upgrading attribution to a spatially-persistent walk —
+still SIMULATED, but it encodes one real assumption: sustained attacks drift locally instead of
+teleporting. That produced this strong, reproducible result. Before reporting it, we ran a
+control: same walk, same towers, but severities randomly shuffled out of their real time
+order. It collapsed to -0.08, not significant. This recording has extreme real temporal
+autocorrelation in severity — sustained attacks occupy a contiguous block of epochs — and the
+walk's whole design maps temporal adjacency to spatial adjacency. So the strong number is
+substantially that real temporal structure getting funneled into apparent spatial structure,
+not independent proof of spatial spread. We're showing you both numbers for exactly that
+reason.
 
-**8. Does this result depend on the epicenter-choice assumption, or would it hold under a
-different simulated attribution?**
+**8. Why switch to this mechanism at all, if the strong result doesn't hold up under your own
+control test?**
 
-It doesn't depend on the epicenter at all — this number comes from round-robin attribution
-only, a completely separate mechanism from the epicenter-and-decay simulation on the tower-map
-slide. We can show it's sensitive to attribution, though: we logged Global Moran's I at several
-checkpoints through the same replay, and it swung from -0.089 (briefly significant dispersion)
-to +0.049 (not significant) and back, multiple sign changes over one recording. That
-volatility is exactly what you'd expect from an assignment mechanism with no structural
-relationship to real tower geometry — it's further evidence the round-robin result is honest
-noise, not a hidden pattern, and it's the direct argument for why real per-tower attribution
-data is the thing that would let this same, real method actually find something.
+Because the mechanism is still a genuine improvement, even though the specific number isn't
+proof. Round-robin encodes zero real assumptions about how an attack would actually move, so
+it was always going to land near zero — that's not a finding either, just a different
+artifact of a different mechanism. Spatially-persistent attribution encodes one real, stated,
+defensible assumption — persistence and local drift — and it demonstrates something round-robin
+structurally couldn't: that this method responds when the input has spatial structure. The
+honest headline is the comparison itself: round-robin near zero, persistent attribution strong
+but explained by temporal-autocorrelation funneling once you control for it — neither one is
+evidence of a real spatial spoofing pattern, and both point at the same fix. Only real
+per-tower attribution data would let us tell a genuine spatial signal from either kind of
+mechanism artifact.

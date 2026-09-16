@@ -184,7 +184,9 @@ epicenter-decay layer above. Full checkpoint log:
 `spatial_processed/live_replay_autocorrelation_result_LIVE.txt`; plots:
 `spatial_processed/lisa_cluster_map_LIVE.png`, `spatial_processed/moran_scatter_LIVE.png`.
 
-**This is the number the deck now uses**, and the honest reading is the argument for the next
+**This was the number the deck used** until the attribution methodology upgrade below
+replaced round-robin as Slide 8's primary mechanism; it remains the honest baseline result for
+round-robin specifically, and the honest reading was, and still is, the argument for the next
 step, not a caveat to bury: the method (KNN weights, global/local Moran's I) is real and
 ready. Round-robin attribution has no reason to produce a real pattern, so it doesn't — which
 is exactly why real per-tower attribution data is the thing that would let this method say
@@ -193,13 +195,119 @@ something meaningful. `build_spatial_autocorrelation_demo.py` and its
 docstring was already honest about its input) but must not be used as the source of a
 "live replay" claim — that mismatch is what happened here.
 
+## Attribution methodology upgrade: spatially-persistent replaces round-robin
+
+Round-robin is not wrong because it produced a weak result — it is a weak mechanism on its own
+terms: memoryless, cycling through towers in fixed order independent of timing, with no
+structural relationship to anything real, so it was always going to produce something close to
+noise (confirmed above: -0.0378, not significant). That is a fine, honest placeholder, but
+`api/spatial.py` now also offers `SpatiallyPersistentAttributor`, a placeholder that encodes
+one real, statable, and openly-disclosed assumption instead of none: **sustained attacks tend
+to persist and drift locally, not teleport to a random distant tower on every event.** No
+ground-truth fix is possible for either mechanism — the Spoofing/2.1.1 recording is a Norway
+test-range log, the 136 towers are real Indonesian infrastructure, and there was never a real
+per-event link between the two to recover. Nothing below changes that; the goal is a more
+defensible heuristic, not a true one.
+
+### Mechanism
+
+A biased random walk over the real tower graph: the first event of a session picks a uniformly
+random real tower; each subsequent event stays at the current tower with probability
+`STAY_PROBABILITY = 0.7`, otherwise moves to one of its `ATTRIBUTION_K_NEIGHBORS = 5` nearest
+real towers (real haversine distance), chosen with probability inversely proportional to
+distance. `ATTRIBUTION_K_NEIGHBORS` happens to equal this module's own `K_NEIGHBORS` (both 5,
+both landing on the same "conventional middle value, 4–8" reasoning from the Method section
+above) but the two are unrelated parameters of two different mechanisms — one is the Moran's I
+spatial-weights graph, the other is a movement rule for attribution — and changing one does not
+imply changing the other.
+
+### Honest result: run once, then a reproducibility check
+
+Per the same discipline that caught the round-robin mismatch, `build_spatial_autocorrelation_persistent_demo.py`
+runs the real production replay mechanism (`ModelService`, `EventStore`,
+`compute_autocorrelation`) with `SpatiallyPersistentAttributor` over the same full Spoofing/2.1.1
+recording, seed=42 first and reported as-is, then two more fresh seeds (43, 44) to check
+stability:
+
+```
+seed=42 (primary): global_moran_i=+0.6676  p=0.0010  z=+7.452  n_towers_scored=30/136
+seed=43 (rerun):    global_moran_i=+0.7769  p=0.0010  z=+8.252  n_towers_scored=34/136
+seed=44 (rerun):    global_moran_i=+0.5936  p=0.0010  z=+7.130  n_towers_scored=38/136
+```
+
+Range across 3 seeds: **I in [+0.594, +0.777], all p=0.001 (the minimum possible at 999
+permutations), all significant, all the same sign** — stable and reproducible, not a one-off.
+Note `n_towers_scored` is far lower than round-robin's 136/136: a local persistent walk visits
+far fewer distinct towers over 2,503 events than a mechanism that deterministically cycles
+through all of them, which is expected of "drift locally" by design, not a bug.
+
+### Self-initiated control: is this a real spatial finding, or a confound?
+
+A result this strong and this stable warranted scrutiny before reporting it uncritically — the
+same discipline that caught the original 0.686 mistake. This recording has extreme real
+lag-1 severity autocorrelation (measured directly: **r = 0.9903** — expected, since a sustained
+attack occupies a contiguous block of epochs, and this scenario is 91% attack rows). The
+persistent attributor's entire design maps *temporal* adjacency to *spatial* adjacency (stay,
+or move to a real neighbor, each step) — so temporally-adjacent events, which already share
+correlated severity for real reasons, land at spatially-adjacent towers. That alone could
+manufacture apparent spatial autocorrelation with no real spatial content at all.
+
+**Control**: the identical seed=42 tower-visit sequence (same spatial walk, same towers, same
+order), but each visit paired with a **randomly shuffled** severity instead of the one from
+that temporal position — breaking the temporal-adjacency-to-severity-correlation link while
+leaving the walk's spatial structure untouched.
+
+```
+control (seed=42 walk, severities shuffled, shuffle_seed=123):
+  global_moran_i=-0.0834   p=0.3310   (not significant)
+```
+
+**The control collapses to near-zero and not significant.** This confirms the strong primary
+result is substantially explained by this single-receiver recording's own real temporal
+autocorrelation being funneled into apparent spatial autocorrelation by the walk's design — not
+independent evidence of a real multi-tower spatial spread pattern. This is a third, distinct
+way a placeholder attribution mechanism can manufacture a number, different from the other two
+already documented in this project: round-robin (memoryless) destroys real temporal structure
+and produces near-zero by construction; the old offline epicenter-decay CSV had no real
+severity input at all and produced a strong positive by construction; spatially-persistent
+attribution uses 100% real severity and 100% real geometry, and its strong result is still
+substantially attributable to the mechanism's own structure — confirmed directly by this
+control — not to independent spatial evidence.
+
+### Bottom line
+
+Spatially-persistent attribution is kept as the new primary attribution mode on Slide 8,
+alongside round-robin (not deleted, still documented above as the **prior, less-structured
+baseline**: -0.0378, not significant), because it is a more defensible placeholder on its own
+terms — it encodes a real, statable assumption instead of none, and it demonstrates that the
+method responds to attribution structure when structure exists. But the specific number it
+produces (I ≈ 0.6–0.8, p=0.001) is not, by itself, proof of real spatial spread: the control
+shows it is substantially a consequence of real temporal autocorrelation funneled through
+spatial coherence. Both the strength of the result and this caveat belong on the slide together
+— exactly as plainly as the round-robin correction states its own caveat, not less. Only real
+per-tower attribution data would settle which (if either) reading is correct.
+
+Full results and reproducibility log:
+`spatial_processed/persistent_replay_autocorrelation_result_LIVE.txt`; plots:
+`spatial_processed/lisa_cluster_map_PERSISTENT.png`,
+`spatial_processed/moran_scatter_PERSISTENT.png` (the scatter plot renders both the real-order
+line and the shuffled-control line together, for direct visual comparison).
+
 ## Where this lives
 
-- `build_spatial_autocorrelation_live_demo.py` — reproduces the deck's headline Slide 8
-  number: a genuine, fresh, once-run live replay through the real `ReplayManager` mechanism
-  (`ModelService`, `TowerAttributor` round-robin, `EventStore`, this module's
-  `compute_autocorrelation`). Rerun it to reproduce `spatial_processed/*_LIVE.*`. See "Deck
-  headline number correction" above.
+- `build_spatial_autocorrelation_live_demo.py` — the round-robin baseline: a genuine, fresh,
+  once-run live replay through the real `ReplayManager` mechanism (`ModelService`,
+  `TowerAttributor` round-robin, `EventStore`, this module's `compute_autocorrelation`). Rerun
+  it to reproduce `spatial_processed/*_LIVE.*`. See "Deck headline number correction" above.
+- `api/spatial.py::SpatiallyPersistentAttributor` — the primary attribution mechanism as of the
+  attribution methodology upgrade: a biased random walk over real tower geometry, alongside
+  (not replacing) `TowerAttributor` round-robin.
+- `build_spatial_autocorrelation_persistent_demo.py` — reproduces Slide 8's current headline
+  number: the same real replay mechanism as above with `SpatiallyPersistentAttributor` swapped
+  in, run once (seed=42) then twice more for reproducibility (seeds 43, 44), plus the
+  shuffled-severity control. Rerun it to reproduce `spatial_processed/*_PERSISTENT.*` and
+  `persistent_replay_autocorrelation_result_LIVE.txt`. See "Attribution methodology upgrade"
+  above.
 - `api/spatial_stats.py` — full implementation (weights, global/local Moran's I, LISA
   classification, the REAL/SIMULATED statement in the module docstring).
 - `GET /spatial/autocorrelation` (`api/main.py`) — returns global I/p-value/z-score and the

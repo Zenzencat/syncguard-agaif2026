@@ -1,0 +1,35 @@
+SyncGuard -- SpatiallyPersistentAttributor live-replay Global/Local Moran's I
+Produced by build_spatial_autocorrelation_persistent_demo.py -- rerun to reproduce.
+
+run_id: Spoofing\stationary\Medium Power (_1W)\Bands_L1_L2_L5\2.1.1
+n_rows_replayed: 2503
+mechanism: biased random walk, stay_prob=0.7, k=5 nearest real neighbors, inverse-distance weighted
+real severity lag-1 autocorrelation in this recording: 0.9903
+
+Per-seed results (seed 42 run once first / primary; 43, 44 are reproducibility reruns):
+  seed=42: global_moran_i=+0.6676  p_value=0.0010  (SIGNIFICANT)  z=+7.452  n_towers_scored=30/136  sig_LISA_towers=16
+  seed=43: global_moran_i=+0.7769  p_value=0.0010  (SIGNIFICANT)  z=+8.252  n_towers_scored=34/136  sig_LISA_towers=24
+  seed=44: global_moran_i=+0.5936  p_value=0.0010  (SIGNIFICANT)  z=+7.130  n_towers_scored=38/136  sig_LISA_towers=19
+
+Range across 3 seeds: I in [+0.5936, +0.7769], all p=0.0010 (min possible at 999 permutations), all SIGNIFICANT and same sign.
+
+SHUFFLED-SEVERITY CONTROL (identical seed=42 spatial walk, severities decoupled from
+real temporal order): global_moran_i=-0.0834  p_value=0.3310  (not significant).
+Interpretation: the control collapses to near-zero and non-significant. This shows the
+strong primary result is substantially explained by real temporal autocorrelation in
+this single-receiver recording (a sustained attack occupies a contiguous block of
+epochs, so temporally-adjacent rows share severity almost exactly) being funneled into
+apparent spatial autocorrelation by the walk's design, which pairs temporal adjacency
+with spatial adjacency -- not independent evidence of a real multi-tower spatial
+spread pattern. This is a different, third way a placeholder attribution mechanism can
+manufacture a number: round-robin (memoryless) destroys real temporal structure and
+produces near-zero by construction; the old offline epicenter-decay CSV had no real
+severity input and produced a strong positive by construction; spatially-persistent
+attribution uses 100% real severity and real geometry, but its strong result is still
+substantially attributable to the mechanism's structure (funneling real temporal
+correlation through spatial coherence), confirmed directly by this control, not to
+independent spatial evidence.
+
+For comparison, round-robin (TowerAttributor, memoryless, no spatial structure) on the
+same recording produced: global_moran_i=-0.0378, p=0.2610, not significant -- see
+live_replay_autocorrelation_result_LIVE.txt / SPATIAL_STATISTICS.md.

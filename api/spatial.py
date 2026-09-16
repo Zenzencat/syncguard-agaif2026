@@ -14,12 +14,18 @@ What is REAL here:
     high in the same window, that's what drives this tower's correlation score up; if none
     do, it doesn't, regardless of distance.
 
-What is SIMULATED here (see TowerAttributor below):
+What is SIMULATED here (see TowerAttributor and SpatiallyPersistentAttributor below):
   - Which physical tower a given scored event "comes from". The Jammertest 2024 dataset is a
     single receiver's log, not a multi-tower deployment, so there is no real per-event tower
-    attribution to use. Events are assigned to real towers by deterministic round-robin
-    cycling (not hand-picked, not random-per-run) -- clearly SIMULATED and documented as such
-    everywhere this module's output surfaces (API response, DB column comments, dashboard).
+    attribution to use, and no ground-truth fix is possible for either mechanism below -- the
+    events happened at a test range in Norway, the towers are real infrastructure in
+    Indonesia. Two SIMULATED attribution mechanisms are available: `TowerAttributor`
+    (deterministic round-robin cycling, memoryless, no relationship to geography) and
+    `SpatiallyPersistentAttributor` (a biased random walk over real tower geometry, encoding
+    the one real, disclosed assumption that sustained attacks persist and drift locally rather
+    than teleporting). Both are clearly SIMULATED and documented as such everywhere this
+    module's output surfaces (API response, DB column comments, dashboard); see
+    SPATIAL_STATISTICS.md for the honest Moran's I result each one produces.
   - The exponential distance-decay weighting function and its decay constant, same as the
     offline layer: a documented simplifying assumption standing in for "nearby infrastructure
     sharing correlated GNSS timing anomalies," not a measured RF propagation model.
@@ -90,6 +96,88 @@ class TowerAttributor:
     def next_tower(self) -> dict:
         row = self._towers.iloc[self._next_idx % len(self._towers)]
         self._next_idx += 1
+        return {
+            "site_id": row["tower_key"],  # disambiguated, unique -- see load_towers()
+            "site_name": row["site_name"],
+            "lat": float(row["lat"]),
+            "lon": float(row["lon"]),
+        }
+
+    @property
+    def towers(self) -> pd.DataFrame:
+        return self._towers
+
+
+ATTRIBUTION_K_NEIGHBORS = 5   # deliberately named distinctly from api/spatial_stats.py's
+                               # K_NEIGHBORS -- both happen to be 5 (SPATIAL_STATISTICS.md's
+                               # "conventional middle value, 4-8" reasoning applies to both),
+                               # but they are unrelated parameters of two different mechanisms;
+                               # changing one does not imply changing the other.
+STAY_PROBABILITY = 0.7        # P(next event stays at the current tower) -- see class docstring
+
+
+class SpatiallyPersistentAttributor:
+    """SIMULATED, alternative to TowerAttributor. Still no ground truth to recover -- the
+    spoofing events happened at a test range in Norway, the 136 towers are real infrastructure
+    in Indonesia, there was never a real link between "this detected event" and "this specific
+    tower." This does not change that. What it changes is which *placeholder* mechanism
+    generates the SIMULATED attribution, replacing round-robin's memoryless cycling (each
+    event's tower is independent of the last, fixed order, no relationship to anything real --
+    which structurally guarantees near-zero spatial autocorrelation almost by construction,
+    the same way the old offline epicenter-decay CSV structurally guaranteed a strong positive
+    one) with a mechanism that encodes one real, statable, and honestly-disclosed assumption:
+    sustained attacks tend to persist and drift locally, not teleport to a random distant
+    tower on every single event.
+
+    Mechanism -- a biased random walk over the real tower graph:
+      1. First event of a session: pick a uniformly random real tower.
+      2. Each subsequent event: stay at the current tower with probability STAY_PROBABILITY
+         (default 0.7); otherwise move to one of its ATTRIBUTION_K_NEIGHBORS nearest real
+         towers (real haversine distance, same constant as haversine_km below), chosen with
+         probability inversely proportional to distance (closer neighbors more likely).
+
+    This produces a spatially-coherent path across real geography -- still SIMULATED, still
+    not a claim about where any real attack was, but a more structurally defensible
+    placeholder than a mechanism with no relationship to geography at all. See
+    SPATIAL_STATISTICS.md's "Attribution methodology" section for the honest result this
+    produces and how it compares to round-robin's.
+    """
+
+    def __init__(self, towers: pd.DataFrame, stay_prob: float = STAY_PROBABILITY,
+                 k: int = ATTRIBUTION_K_NEIGHBORS, seed: int | None = None):
+        self._towers = towers.reset_index(drop=True)
+        self._stay_prob = stay_prob
+        self._k = k
+        self._rng = np.random.default_rng(seed)
+        self._current_idx: int | None = None
+        self._neighbor_idx, self._neighbor_weights = self._build_neighbor_table()
+
+    def _build_neighbor_table(self) -> tuple[np.ndarray, np.ndarray]:
+        """Precompute, for every tower, its k nearest real neighbors (by real haversine
+        distance) and inverse-distance move probabilities -- built once at construction, not
+        recomputed per event."""
+        n = len(self._towers)
+        lats = self._towers["lat"].to_numpy()
+        lons = self._towers["lon"].to_numpy()
+        neighbor_idx = np.zeros((n, self._k), dtype=int)
+        neighbor_weights = np.zeros((n, self._k), dtype=float)
+        for i in range(n):
+            dist = haversine_km(lats[i], lons[i], lats, lons)
+            dist[i] = np.inf  # exclude self as a neighbor of itself
+            nearest = np.argsort(dist)[: self._k]
+            inv = 1.0 / np.maximum(dist[nearest], 1e-6)
+            neighbor_idx[i] = nearest
+            neighbor_weights[i] = inv / inv.sum()
+        return neighbor_idx, neighbor_weights
+
+    def next_tower(self) -> dict:
+        if self._current_idx is None:
+            self._current_idx = int(self._rng.integers(0, len(self._towers)))
+        elif self._rng.random() >= self._stay_prob:
+            candidates = self._neighbor_idx[self._current_idx]
+            weights = self._neighbor_weights[self._current_idx]
+            self._current_idx = int(self._rng.choice(candidates, p=weights))
+        row = self._towers.iloc[self._current_idx]
         return {
             "site_id": row["tower_key"],  # disambiguated, unique -- see load_towers()
             "site_name": row["site_name"],
