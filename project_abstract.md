@@ -5,6 +5,16 @@
 *This abstract covers all 10 PDGS Canvas dimensions: C1–C3 (§1), C4 (§3), C5–C7 (§2, §4), C8
 (§5), C9–C10 (§6).*
 
+**TL;DR**: GNSS spoofing can silently corrupt the timing that 4G/5G base stations depend on,
+degrading network performance with no alarm to trigger — and no hardware change is required to
+fix it. SyncGuard is a retrofit-first, per-site anomaly detector that flags jamming, spoofing,
+and meaconing from GNSS receiver observables already exposed by off-the-shelf modules, now
+running as a full explainable service (FastAPI, SHAP, live spatial statistics). On real
+JammerTest 2024 attack data, the shipped model reaches 87.7% accuracy and 93.7% attack recall
+on recordings never seen in training — with the two honest gaps (weaker clean-class recall, and
+an unvalidated jump from test-range receivers to production base-station timing) disclosed
+below rather than smoothed over.
+
 ---
 
 ## 1. Problem
@@ -125,6 +135,15 @@ stated assumption in this submission, not something the data demonstrates direct
 public dataset of real telecom base-station GNSS timing under spoofing currently exists. This
 is a genuine limitation of the evidence base available for this hackathon timeline, and is
 carried forward explicitly into the roadmap below rather than left implicit.
+
+**A load-bearing assumption this carries, stated explicitly**: the feature set (§4) assumes a
+real telecom GNSSDO module exposes the same fields the u-blox survey receiver used for
+training exposes — per-satellite C/N0, AGC count, jamming indicator, noise floor. Real
+telecom-grade GNSSDO hardware (e.g. Trimble, Furuno) may not expose these fields through any
+accessible interface, in which case the feature-extraction pipeline itself, not just the
+model, would need rework before pilot validation (step 1 of the roadmap, §6) could even begin.
+This is currently unstated anywhere else in this submission and is not something the test-range
+dataset can confirm either way.
 
 **A second axis of the same gap — receiver motion.** A base-station GNSSDO is bolted to a
 fixed site; the deployment-relevant receiver state is therefore *stationary*, with a stable
@@ -259,7 +278,7 @@ held-out recordings never seen during training, at the shipped decision threshol
 **Recall by attack type** (of true attack rows): Spoofing+Jamming 98.5%, Spoofing 97.1%,
 Meaconing 96.5%, Jamming 85.8% (weakest of the four).
 
-**Two limitations, stated as such rather than minimized**:
+**Three limitations, stated as such rather than minimized**:
 
 1. **Clean-class recall — 66.7% on the fixed held-out split, and 0.36–0.79 across the four
    GroupKFold folds (mean 0.66 ± 0.20, the honest confidence range) — is well below attack
@@ -274,6 +293,13 @@ Meaconing 96.5%, Jamming 85.8% (weakest of the four).
    which rank lower. The detector is doing well partly by re-deriving signal already available
    in commodity receiver firmware; whether the purpose-built signal can be made dominant on
    this dataset is exactly what the six experiments below tested.
+3. **The training/test split is 77% attack / 23% clean — the inverse of a real deployment's
+   base rate**, where a base station spends the overwhelming majority of its time *not* under
+   attack. `class_weight='balanced'` reweights for the imbalance seen during training, but that
+   does not fix the base-rate mismatch at deployment: a 33.3% false-positive rate measured
+   against a 23%-clean test set implies a much larger absolute volume of false alerts once
+   applied to a real, attack-rare traffic mix. This is a known open question about
+   real-world alert volume, not something this submission has measured or resolved.
 
 **We tried, rigorously, to close limitation 1.** Six independent experiments targeted the
 clean-recall gap — sample reweighting, probability calibration, session-relative feature
@@ -332,9 +358,17 @@ network, not a demonstrated regional spoofing event.
 **Claim boundaries**: consistent with the scope-of-claim above, this submission does not
 assert that test-range detection performance transfers unchanged to production base-station
 timing — that is an explicit assumption pending pilot validation (see Implementation
-Roadmap), not a demonstrated result. The two limitations in §5 (weaker clean-class recall,
+Roadmap), not a demonstrated result. The three limitations in §5 (weaker clean-class recall,
 feature importance leaning on generic RF-monitor signal rather than the purpose-built
-spoofing features) are disclosed rather than smoothed over, for the same reason.
+spoofing features, and the attack-heavy training/test split's inverted base rate) are
+disclosed rather than smoothed over, for the same reason.
+
+**Demand validation**: everything above is a *technical* limitation, disclosed as such. This
+submission does not separately validate the demand side — nothing here confirms that a
+telecom operator would actually want, trust, or adopt a third-party GNSS anomaly detector on
+its base-station infrastructure. That is as open a question as the technical generalization
+gap above, and we're naming it explicitly for the same reason: the honesty here should be
+even-handed, not concentrated only on what's easiest to measure.
 
 **Privacy**: the Jammertest 2024 dataset consists of GNSS receiver and RF-monitor telemetry
 from equipment at a controlled test event — no personal data, and no linkage to identifiable
@@ -345,10 +379,12 @@ live logs, which is folded into step (1) of the roadmap below.
 
 **Sustainability**: the retrofit-first design (§2) avoids the resource cost and e-waste of a
 GNSS receiver hardware refresh across a regional base-station fleet; edge deployment (§2, §6)
-keeps compute and bandwidth footprint low relative to a cloud-round-trip architecture; and the
-lightweight, open-source Python stack (§4) — no proprietary SDR/MATLAB licensing — keeps the
-barrier to reproduction and adoption low across markets with uneven resourcing, in line with
-the curriculum's own equitable-access framing.
+is designed to keep compute and bandwidth footprint low relative to a cloud-round-trip
+architecture — real-world footprint at a live cell site is pending the edge-deployment
+feasibility assessment already listed in the roadmap (step 3, §6), not yet a measured result;
+and the lightweight, open-source Python stack (§4) — no proprietary SDR/MATLAB licensing —
+keeps the barrier to reproduction and adoption low across markets with uneven resourcing, in
+line with the curriculum's own equitable-access framing.
 
 ## 6. Expected Impact
 *(PDGS Canvas C9 — Value & Impact; C10 — Implementation Roadmap)*
