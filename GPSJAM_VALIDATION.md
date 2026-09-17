@@ -139,12 +139,69 @@ other — both are true, and this doesn't prove interference *isn't* happening, 
 particular real, independently-sourced dataset has nothing to say about it either way, for this
 specific week.
 
-**Not rerun with a wider region or a different week** — that would be exactly the "keep tuning
-the mechanism until it says something" the discipline of this whole exercise exists to
-avoid. If a wider check (e.g., all of West Kalimantan, or a longer date range) is wanted, that's
-a deliberate follow-up decision, not something to default into after seeing a null result.
+At the time this was first written, this section said the null result would not be rerun with
+a wider region without a deliberate decision to do so. That decision was made explicitly (see
+below) — this is that follow-up, not a reflexive re-run.
 
 Per-hex data (empty, for the record): `spatial_processed/gpsjam_kubu_raya_pontianak_2024-04-01_2024-04-07.csv`.
+
+## Follow-up: widened regional check — all of West Kalimantan
+
+**Why**: the tight-region null result above only says there's no ADS-B coverage over the exact
+136-tower cluster for that one week. It doesn't distinguish "no coverage anywhere near here"
+from "coverage exists nearby, just not over the exact tower cluster." Free to check — the
+seven daily CSVs already on disk are global, so widening the query costs nothing new: no new
+data fetch, same real files, just a bigger bounding box.
+
+**Region**: all of West Kalimantan province, confirmed by search (not assumed) at 2°08'N to
+3°05'S, 108°00'E to 114°10'E — fully containing the tight Kubu Raya/Pontianak box. Also
+confirmed by search: Supadio International Airport (WIOO/PNK), the most plausible source of
+real ADS-B-equipped traffic in the region, sits at -0.1503, 109.4023 — inside *both* boxes, so
+the original tight-region null already included the airport's own hex specifically.
+
+```
+n_hexes: 16   (just clears MIN_HEXES_FOR_STATS=15 -- barely computable, low power)
+global_moran_i: +0.1195   p_value: 0.2400   (not significant)   z: +0.742
+significant LISA hexes: 2/16 (1 High-High, 1 Low-Low)
+```
+
+**Both parts of the question this was designed to answer, resolved directly:**
+
+1. **Coverage exists nearby.** 16 real hexes have recorded aircraft data somewhere in West
+   Kalimantan that week — the tight-region 0-hex result is specifically a "sits between
+   coverage gaps" finding, not evidence that GPSJam has no visibility into this part of Borneo
+   at all.
+2. **But not over the target region, and not over the airport.** Checked directly, not
+   assumed: Supadio's own hex (`848c95dffffffff`) has zero rows in all seven files, same as
+   before. Plotting the 16 hexes shows them confined to two clusters — near the Sarawak
+   (Malaysia) border in the north (lat ~1.5–2.0°) and along the western coast (lon ~108.0–108.8°)
+   — with nothing anywhere near the actual Pontianak/Kubu Raya urban core in the center of the
+   province. The coverage gap is specific to the target region, not a province-wide absence.
+
+**A caveat worth stating plainly, found while writing this up**: every single one of the 16
+hexes has `count_bad_aircraft = 0` — zero interference recorded anywhere coverage exists in
+West Kalimantan that week. That's a real, additional, positive data point (clean GPS wherever
+GPSJam had visibility, not just silence in the target region) — but it also means the Moran's I
+number above isn't really testing spatial clustering *of interference*, because there's no
+interference in the data to cluster: `bad_frac` here is driven entirely by aircraft count
+(`-1/good_count`), not GPS quality. Reported as computed, per the same discipline as
+everywhere else in this project, but read it as "no significant spatial pattern in aircraft
+coverage density," not "no significant clustering of jamming" — the latter needs actual
+interference to test, and there wasn't any to test against this week.
+
+**Per the discipline set for this follow-up**: this cleared the 15-hex floor, so the Moran's I
+check above was run once and reported as-is — not rerun, not widened further to chase a
+different number. It also isn't rerun with a different, larger region now that this one
+cleared the floor: 16 hexes is barely enough for permutation-test power to mean anything, and
+that's reported honestly above, not papered over by expanding the box again.
+
+**Temporal widening (a longer date range) is not pursued here** — per instruction, this stays a
+question flagged back rather than a default next step, since it would require a new manual
+data fetch (gpsjam.org is still blocked in this environment) and Step 1/2 above already
+answered the geographic question the original null result left open.
+
+Plots: `spatial_processed/gpsjam_west_kalimantan_2024-04-01_2024-04-07_lisa_map.png`,
+`..._moran_scatter.png`. Per-hex data: `spatial_processed/gpsjam_west_kalimantan_2024-04-01_2024-04-07.csv`.
 
 ## Where this lives
 
@@ -156,9 +213,10 @@ Per-hex data (empty, for the record): `spatial_processed/gpsjam_kubu_raya_pontia
   ```
   python validate_moran_gpsjam.py proof-of-method --start 2024-04-01 --end 2024-04-07 --data-dir gpsjam_raw
   python validate_moran_gpsjam.py region-check --start 2024-04-01 --end 2024-04-07 --data-dir gpsjam_raw
+  python validate_moran_gpsjam.py region-check-wide --start 2024-04-01 --end 2024-04-07 --data-dir gpsjam_raw
   ```
   (Omit `--data-dir` to hit `gpsjam.org` directly, from an environment that can reach it.)
-- `spatial_processed/gpsjam_*` — per-hex CSVs and plots from both runs.
+- `spatial_processed/gpsjam_*` — per-hex CSVs and plots from all three runs.
 
 ## Step 4 — Q&A-only, deliberately narrow
 

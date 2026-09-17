@@ -95,6 +95,15 @@ REGIONS = {
     # Same bounding box already verified clean elsewhere in this project
     # (spatial_layer_notes.md): lat -0.86..+0.10, lon 109.15..110.07.
     "kubu_raya_pontianak": (-0.86, 0.10, 109.15, 110.07),
+    # All of West Kalimantan (Kalimantan Barat) province -- widened check, Step 1 of the
+    # "widen the GPSJam regional check" follow-up. Province extent confirmed by search
+    # (not assumed): 2 deg 08'N to 3 deg 05'S, 108 deg 00'E to 114 deg 10'E. Fully contains
+    # the tight kubu_raya_pontianak box above, and Supadio International Airport (WIOO/PNK,
+    # -0.1503, 109.4023 -- confirmed by search) sits inside BOTH boxes, so the original
+    # tight-region null result already included the airport's own hex; this widened box
+    # tests whether coverage exists anywhere nearby, not whether the airport specifically
+    # was missed.
+    "west_kalimantan": (-3.0833, 2.1333, 108.0, 114.1667),
 }
 
 
@@ -316,7 +325,7 @@ def daterange(start: str, end: str) -> list[str]:
 def main():
     global LOCAL_DATA_DIR
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["proof-of-method", "region-check", "manifest"])
+    parser.add_argument("mode", choices=["proof-of-method", "region-check", "region-check-wide", "manifest"])
     parser.add_argument("--start", help="YYYY-MM-DD")
     parser.add_argument("--end", help="YYYY-MM-DD")
     parser.add_argument("--data-dir", help="Read manifest.csv/{date}-h3_4.csv from this local "
@@ -334,10 +343,18 @@ def main():
         return
 
     dates = daterange(args.start, args.end)
-    region = "black_sea_crimea" if args.mode == "proof-of-method" else "kubu_raya_pontianak"
-    label = ("Proof-of-method (Black Sea / Crimea, known real jamming)"
-             if args.mode == "proof-of-method" else
-             "Honest regional check (Kubu Raya / Pontianak)")
+    region_by_mode = {
+        "proof-of-method": "black_sea_crimea",
+        "region-check": "kubu_raya_pontianak",
+        "region-check-wide": "west_kalimantan",
+    }
+    label_by_mode = {
+        "proof-of-method": "Proof-of-method (Black Sea / Crimea, known real jamming)",
+        "region-check": "Honest regional check (Kubu Raya / Pontianak)",
+        "region-check-wide": "Widened regional check (all of West Kalimantan, incl. Supadio Airport)",
+    }
+    region = region_by_mode[args.mode]
+    label = label_by_mode[args.mode]
 
     print(f"Fetching {len(dates)} day(s) of real GPSJam data for region={region}...")
     agg = aggregate_date_range(dates, region)
