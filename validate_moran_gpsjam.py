@@ -33,15 +33,13 @@ loadManifest() functions:
     something introduced here -- reused verbatim for fidelity to their own definition, as the
     continuous severity value fed into Moran's I below.
 
-IMPORTANT -- this script has NOT been run end-to-end. gpsjam.org is blocked by this
-environment's network egress policy (confirmed: CONNECT tunnel fails with HTTP 403, consistent
-with an organization-level policy decision, not a transient failure -- per this environment's
-own operating rules, that is reported, not routed around). Every fact above about the data
-schema was confirmed by reading the site's actual deployed source code, not assumed. The
-extraction and Moran's I logic below follows this project's own established conventions
-exactly (RNG_SEED=42, 999 permutations, KNN vs. contiguity reasoning) but should be smoke-
-tested against one real manifest.csv + one real day's CSV before its output is trusted -- see
-GPSJAM_VALIDATION.md for what that would involve and why it wasn't possible from here.
+Status: RUN, against real data, both modes -- see GPSJAM_VALIDATION.md for full results.
+gpsjam.org itself is blocked by this environment's network egress policy (confirmed: CONNECT
+tunnel fails with HTTP 403, an organization-level policy decision, reported rather than routed
+around), so the manifest and the seven daily CSVs used here (2024-04-01 through 2024-04-07)
+were fetched from a machine that could reach the site and supplied via `--data-dir` instead of
+over HTTP. Every fact in this docstring about the data schema was confirmed by reading the
+site's actual deployed source code, not assumed.
 
 Spatial weights -- hex contiguity, not KNN: unlike the 136 irregularly-spaced Telkomsel towers
 (where KNN k=5 was the defensible choice -- see SPATIAL_STATISTICS.md), H3 hex cells form a
@@ -52,8 +50,9 @@ a square grid's ambiguous corner-touching case) -- so first-ring contiguity (`h3
 used here instead of KNN.
 
 Usage:
-    python validate_moran_gpsjam.py proof-of-method --start 2022-05-01 --end 2022-05-07
-    python validate_moran_gpsjam.py region-check --start 2022-05-01 --end 2022-05-07
+    python validate_moran_gpsjam.py proof-of-method --start 2024-04-01 --end 2024-04-07 --data-dir gpsjam_raw
+    python validate_moran_gpsjam.py region-check --start 2024-04-01 --end 2024-04-07 --data-dir gpsjam_raw
+    # Omit --data-dir to fetch from gpsjam.org directly, from an environment that can reach it.
 
 Requires (not part of requirements.txt/requirements-api.txt -- this is a standalone,
 one-off validation utility, not part of the shipped SyncGuard system): requests, h3>=4,
@@ -72,6 +71,11 @@ from libpysal.weights import W
 from esda.moran import Moran, Moran_Local
 
 BASE_URL = "https://gpsjam.org/data"
+LOCAL_DATA_DIR: Path | None = None  # set by main() from --data-dir; when set, reads local
+                                     # files instead of hitting the network at all -- used
+                                     # when gpsjam.org itself isn't reachable but the specific
+                                     # files have been fetched some other way (see
+                                     # GPSJAM_VALIDATION.md)
 H3_RESOLUTION = 4
 RNG_SEED = 42  # same convention as api/spatial_stats.py / ROBUSTNESS_NOTES.md
 N_PERMUTATIONS = 999
@@ -95,6 +99,10 @@ REGIONS = {
 
 
 def fetch_manifest() -> pd.DataFrame:
+    if LOCAL_DATA_DIR is not None:
+        path = LOCAL_DATA_DIR / "manifest.csv"
+        print(f"  [local] reading {path}")
+        return pd.read_csv(path)
     resp = requests.get(f"{BASE_URL}/manifest.csv", timeout=30)
     resp.raise_for_status()
     from io import StringIO
@@ -102,7 +110,17 @@ def fetch_manifest() -> pd.DataFrame:
 
 
 def fetch_day(date_str: str) -> pd.DataFrame:
-    """date_str: 'YYYY-MM-DD'. Returns the raw per-hex CSV for that day, globally."""
+    """date_str: 'YYYY-MM-DD'. Returns the raw per-hex CSV for that day, globally. Reads from
+    LOCAL_DATA_DIR if set (files fetched some other way -- see GPSJAM_VALIDATION.md), else
+    hits gpsjam.org directly."""
+    if LOCAL_DATA_DIR is not None:
+        path = LOCAL_DATA_DIR / f"{date_str}-h3_4.csv"
+        if not path.exists():
+            raise FileNotFoundError(f"No local file for {date_str}: {path}")
+        print(f"  [local] reading {path}")
+        df = pd.read_csv(path)
+        df["date"] = date_str
+        return df
     url = f"{BASE_URL}/{date_str}-h3_4.csv"
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
@@ -142,7 +160,7 @@ def aggregate_date_range(dates: list[str], region_name: str) -> pd.DataFrame:
     for d in dates:
         try:
             day_df = fetch_day(d)
-        except requests.HTTPError as e:
+        except (requests.HTTPError, FileNotFoundError) as e:
             print(f"  [skip] {d}: {e}")
             continue
         day_df = add_severity_and_latlon(day_df)
@@ -169,7 +187,7 @@ def build_hex_contiguity_weights(hexes: list[str]) -> W:
     hex_set = set(hexes)
     neighbors = {}
     for h in hexes:
-        ring = h3.grid_disk(h, 1)
+        ring = set(h3.grid_disk(h, 1))  # h3-py v4 returns a list, not a set
         ring.discard(h)
         neighbors[h] = [n for n in ring if n in hex_set]
     w = W(neighbors)
@@ -214,7 +232,80 @@ def run_moran(agg: pd.DataFrame, label: str):
         "n_hexes": n, "global_moran_i": float(global_mi.I), "p_value": float(global_mi.p_sim),
         "z_score": float(global_mi.z_sim), "expected_i": float(global_mi.EI),
         "n_significant_lisa": n_sig,
+        "_agg": agg, "_w": w, "_severities": severities,
+        "_local_q": local_mi.q, "_local_p": local_mi.p_sim,
     }
+
+
+QUADRANT_COLORS = {0: "#c9ccd1", 1: "#d1263b", 2: "#7fb3e8", 3: "#1f5fa8", 4: "#f0a35c"}
+QUADRANT_LABELS = {
+    0: "Not significant", 1: "High-High (hotspot)", 2: "Low-High (spatial outlier)",
+    3: "Low-Low (coldspot)", 4: "High-Low (spatial outlier)",
+}
+
+
+def plot_result(result: dict, label: str, out_prefix: Path):
+    """LISA map + Moran scatter for a computable result -- same visual convention as
+    build_spatial_autocorrelation_live_demo.py / build_spatial_autocorrelation_persistent_demo.py."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    agg = result["_agg"]
+    w = result["_w"]
+    sev = result["_severities"]
+    quads = np.array([
+        int(q) if p < SIGNIFICANCE_ALPHA else 0
+        for q, p in zip(result["_local_q"], result["_local_p"])
+    ])
+    lats = agg["lat"].to_numpy()
+    lons = agg["lon"].to_numpy()
+
+    fig, ax = plt.subplots(figsize=(9.2, 8.2), dpi=200)
+    fig.patch.set_facecolor("white"); ax.set_facecolor("white")
+    for q in [0, 2, 4, 1, 3]:
+        mask = quads == q
+        if not mask.any():
+            continue
+        ax.scatter(lons[mask], lats[mask], s=90 if q != 0 else 45,
+                   c=QUADRANT_COLORS[q], edgecolors="#2a2a2a" if q != 0 else "none",
+                   linewidths=0.6, alpha=0.95 if q != 0 else 0.6,
+                   label=f"{QUADRANT_LABELS[q]} ({mask.sum()})", zorder=3 if q != 0 else 2)
+    ax.set_xlabel("Longitude", fontsize=11); ax.set_ylabel("Latitude", fontsize=11)
+    ax.set_title(f"Local Moran's I (LISA) -- real GPSJam H3 hexes\n{label}",
+                 fontsize=12, fontweight="bold")
+    ax.legend(loc="best", fontsize=9, framealpha=0.95)
+    ax.grid(True, alpha=0.15)
+    for spine in ax.spines.values():
+        spine.set_color("#888888")
+    plt.tight_layout()
+    plt.savefig(f"{out_prefix}_lisa_map.png", facecolor="white")
+    plt.close(fig)
+
+    z = (sev - sev.mean()) / sev.std()
+    lag = w.sparse @ z
+    colors = [QUADRANT_COLORS[q] for q in quads]
+    fig2, ax2 = plt.subplots(figsize=(8.2, 8.2), dpi=200)
+    fig2.patch.set_facecolor("white"); ax2.set_facecolor("white")
+    ax2.scatter(z, lag, c=colors, s=60, edgecolors="#2a2a2a", linewidths=0.5, alpha=0.9, zorder=3)
+    ax2.axhline(0, color="#999999", linewidth=0.8); ax2.axvline(0, color="#999999", linewidth=0.8)
+    m, b = np.polyfit(z, lag, 1)
+    xs = np.linspace(z.min(), z.max(), 100)
+    sig_str = "significant" if result["p_value"] < SIGNIFICANCE_ALPHA else "not significant"
+    ax2.plot(xs, m * xs + b, color="#d1263b", linewidth=2.2, zorder=4,
+             label=f"Moran's I = {result['global_moran_i']:.3f}  (p = {result['p_value']:.3f}, {sig_str})")
+    ax2.set_xlabel("Standardized bad_frac (z)", fontsize=11)
+    ax2.set_ylabel("Spatial lag (H3 first-ring contiguity)", fontsize=11)
+    ax2.set_title(f"Moran Scatter Plot -- real GPSJam H3 hexes\n{label}", fontsize=12, fontweight="bold")
+    ax2.legend(loc="upper left", fontsize=9, framealpha=0.95)
+    ax2.grid(True, alpha=0.15)
+    for spine in ax2.spines.values():
+        spine.set_color("#888888")
+    plt.tight_layout()
+    plt.savefig(f"{out_prefix}_moran_scatter.png", facecolor="white")
+    plt.close(fig2)
+    print(f"  Wrote {out_prefix}_lisa_map.png")
+    print(f"  Wrote {out_prefix}_moran_scatter.png")
 
 
 def daterange(start: str, end: str) -> list[str]:
@@ -223,11 +314,18 @@ def daterange(start: str, end: str) -> list[str]:
 
 
 def main():
+    global LOCAL_DATA_DIR
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["proof-of-method", "region-check", "manifest"])
     parser.add_argument("--start", help="YYYY-MM-DD")
     parser.add_argument("--end", help="YYYY-MM-DD")
+    parser.add_argument("--data-dir", help="Read manifest.csv/{date}-h3_4.csv from this local "
+                         "directory instead of gpsjam.org (used when the host itself isn't "
+                         "reachable but the specific files were fetched some other way -- see "
+                         "GPSJAM_VALIDATION.md).")
     args = parser.parse_args()
+    if args.data_dir:
+        LOCAL_DATA_DIR = Path(args.data_dir)
 
     if args.mode == "manifest":
         m = fetch_manifest()
@@ -250,7 +348,10 @@ def main():
     agg.to_csv(out_path, index=False)
     print(f"\nWrote per-hex data to {out_path}")
     if result:
-        print(f"Result: {result}")
+        printable = {k: v for k, v in result.items() if not k.startswith("_")}
+        print(f"Result: {printable}")
+        prefix = OUT_DIR / f"gpsjam_{region}_{args.start}_{args.end}"
+        plot_result(result, label, prefix)
 
 
 if __name__ == "__main__":
