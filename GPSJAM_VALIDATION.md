@@ -160,9 +160,11 @@ Per-hex data (empty, for the record): `spatial_processed/gpsjam_kubu_raya_pontia
   (Omit `--data-dir` to hit `gpsjam.org` directly, from an environment that can reach it.)
 - `spatial_processed/gpsjam_*` — per-hex CSVs and plots from both runs.
 
-## Step 4 — deliberately not decided here
+## Step 4 — Q&A-only, deliberately narrow
 
-This document is the write-up. Whether/how this belongs in the live pitch — a compressed
-callout, a backup slide only shown if asked in Q&A, or left as repo/documentation strength
-alone — stays a deliberate decision to be made explicitly, not defaulted into. Nothing here has
-touched the deck, the narration script, or its word count.
+Resolved to the narrowest option: **`SyncGuard_Narration_Script_v2.md`'s Q&A Prep section
+gained one new entry (#9)** covering this validation as a fallback answer if a judge asks
+whether Moran's I/LISA actually works. Nothing else changed — Slide 8's on-screen text, its
+speaker notes, and every slide's main narration are untouched, and the deck's spoken-runtime
+word count (which explicitly excludes Q&A prep) is unaffected. This document remains the full
+methodology and results write-up that Q&A entry points back to.

@@ -286,3 +286,20 @@ but explained by temporal-autocorrelation funneling once you control for it — 
 evidence of a real spatial spoofing pattern, and both point at the same fix. Only real
 per-tower attribution data would let us tell a genuine spatial signal from either kind of
 mechanism artifact.
+
+**9. How do you know Moran's I/LISA actually works — that it's not just returning noise
+regardless of input?**
+
+We validated the exact same code path against real, independently-documented data completely
+separate from our own tower network: GPSJam.org's public GPS-interference data, from real
+aircraft ADS-B reports, for the Black Sea/Crimea corridor during a week of confirmed jamming
+activity. Result: Global Moran's I of positive 0.627, p equals 0.001 — significant clustering,
+with the hotspot band landing almost exactly on the documented Crimea/Kerch Strait jamming
+corridor reported in EASA advisories. That confirms this project's statistical method
+genuinely detects real spatial clustering when real ground-truth data exists. It's also why
+we're confident the null and inconsistent results on our own tower network were never a flaw
+in the method — they're a direct consequence of not yet having real per-event attribution
+data, exactly what step one of our pilot roadmap targets. We ran the same check on our own
+target region, Kubu Raya and Pontianak — zero recorded interference in that airspace for the
+same week, a genuine finding about a region with no currently known jamming activity, not a
+filtering error. Full methodology and results: `GPSJAM_VALIDATION.md`.
