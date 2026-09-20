@@ -239,6 +239,7 @@ def test_protected_routes_require_a_key(auth_client, path):
 def test_protected_post_routes_require_a_key(auth_client):
     assert auth_client.post("/score", json=IN_RANGE).status_code == 401
     assert auth_client.post("/ingest", json={"observations": []}).status_code == 401
+    assert auth_client.post("/demo/reset").status_code == 401
 
 
 def test_valid_key_via_x_api_key_header(auth_client):

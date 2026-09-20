@@ -444,6 +444,24 @@ class EventStore:
         with self._lock:
             return self._conn.execute("SELECT COUNT(*) FROM scored_events").fetchone()[0]
 
+    def clear_all(self) -> None:
+        """Demo-mode-only reset (see POST /demo/reset): deletes every scored event, analyst
+        label and label-history row. Does not touch tower data or the model -- those aren't
+        stored here. Irreversible; callers are responsible for gating who can call this."""
+        with self._lock:
+            try:
+                self._conn.execute("DELETE FROM scored_events")
+                self._conn.execute("DELETE FROM event_feedback")
+                self._conn.execute("DELETE FROM event_feedback_log")
+                self._conn.execute(
+                    "DELETE FROM sqlite_sequence WHERE name IN "
+                    "('scored_events', 'event_feedback_log')"
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
     def close(self):
         with self._lock:
             self._conn.close()

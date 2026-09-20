@@ -119,6 +119,7 @@ class HealthResponse(BaseModel):
     auth_key_is_weak: Optional[bool] = Field(default=None, description="True when a configured key is shorter than the recommended minimum. Never reveals the key or its length.")
     baseline_loaded: bool = Field(default=False, description="Whether the training-distribution baseline (api/feature_baseline.json) is available for input warnings and /drift.")
     baseline_generated_at: Optional[str] = None
+    demo_mode: bool = Field(default=False, description="True when SYNCGUARD_DEMO_MODE=1, which enables POST /demo/reset (stop replay, clear all events/incidents/feedback) and shows the dashboard's 'New session' button.")
 
 
 class LisaTower(BaseModel):

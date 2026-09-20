@@ -65,6 +65,14 @@ log = configure_logging()
 # See api/auth.py, including why /stream/events uses a cookie rather than a query token.
 AUTH = ApiKeyAuth()
 
+# Demo-only "New session" reset (POST /demo/reset). Off unless SYNCGUARD_DEMO_MODE=1 is set
+# -- irreversibly clears every scored event, incident, and analyst label, so it must never be
+# reachable by accident. Still subject to AUTH like every other non-exempt route: with
+# SYNCGUARD_API_KEY set, this also needs the key. Read per-request (not cached at import) so
+# it can be exercised with monkeypatch in tests, same as any other real request-time check.
+def _demo_mode_enabled() -> bool:
+    return os.environ.get("SYNCGUARD_DEMO_MODE") == "1"
+
 # Number of most-recent scored events GET /drift samples by default.
 DRIFT_DEFAULT_SAMPLE = 1000
 DRIFT_MAX_SAMPLE = 20000
@@ -292,6 +300,7 @@ async def health():
         auth_key_is_weak=AUTH.weak_key if AUTH.enabled else None,
         baseline_loaded=baseline is not None,
         baseline_generated_at=baseline.generated_at if baseline else None,
+        demo_mode=_demo_mode_enabled(),
     )
 
 
@@ -779,6 +788,25 @@ async def replay_stop():
     if app.state.replay_manager is None:
         raise HTTPException(503, "No trained model loaded.")
     return app.state.replay_manager.stop()
+
+
+@app.post("/demo/reset")
+async def demo_reset():
+    """Demo-only 'New session' reset: stops any running replay, then irreversibly clears
+    every scored event, incident grouping input, and analyst label -- a clean slate for the
+    next walkthrough. Off unless SYNCGUARD_DEMO_MODE=1 (see _demo_mode_enabled() above); also
+    subject to the normal API-key auth like any other non-exempt route when one is configured."""
+    if not _demo_mode_enabled():
+        raise HTTPException(
+            403, "Demo mode is off. Set SYNCGUARD_DEMO_MODE=1 to enable POST /demo/reset."
+        )
+    if app.state.replay_manager and app.state.replay_manager.status["status"] == "running":
+        app.state.replay_manager.stop()
+    app.state.event_store.clear_all()
+    if app.state.ingest_service:
+        app.state.ingest_service.hysteresis.reset()
+    log.info("demo session reset")
+    return {"status": "reset", "demo_mode": True}
 
 
 @app.get("/replay/status")

@@ -409,6 +409,7 @@
                title="Sent once to POST /auth/session, which returns an HttpOnly session cookie. The key is never placed in a URL and never stored in localStorage." />
         <button class="btn" id="btn-connect">Connect</button>
         </span>
+        <button type="button" class="btn stop" id="btn-new-session" hidden title="Demo mode: stop replay and clear all events, incidents and labels">New session</button>
       </div>
       <div class="controls">
         <label for="run-select">Scenario</label>
@@ -933,6 +934,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
 
   const statusPill = $('api-status'), statusText = $('api-status-text');
   const btnConnect = $('btn-connect'), btnStart = $('btn-start'), btnStop = $('btn-stop');
+  const btnNewSessionEl = $('btn-new-session');
   const runSelect = $('run-select'), speedSelect = $('speed-select');
   const logEl = $('live-log'), countEl = $('replay-count');
 
@@ -1653,6 +1655,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       const health = await fetch(base() + '/health').then(r => r.json());
       authRequired = !!health.auth_required;
       apiKeyInput.style.display = authRequired ? '' : 'none';
+      if(btnNewSessionEl) btnNewSessionEl.hidden = !health.demo_mode;
 
       if(!health.model_loaded){
         setStatus('bad', 'API up, but no model loaded (run `make train`)');
@@ -1791,6 +1794,21 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     btnStart.disabled = false; btnStop.disabled = true;
     setDataMode('THIS SESSION');
   });
+
+  if(btnNewSessionEl){
+    btnNewSessionEl.addEventListener('click', async () => {
+      if(!confirm('Start a new session? This stops any running replay and permanently clears all events, incidents and analyst labels.')) return;
+      btnNewSessionEl.disabled = true;
+      try{
+        const res = await api('/demo/reset', {method:'POST'});
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        location.reload();
+      }catch(err){
+        btnNewSessionEl.disabled = false;
+        setStatus('bad', `could not start a new session: ${err.message}`);
+      }
+    });
+  }
 
   function updateSpeedHint(){
     const s = Number(speedSelect.value);
