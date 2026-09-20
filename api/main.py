@@ -27,7 +27,7 @@ from api.schemas import (TelemetryInput, ScoreResponse, HealthResponse, Autocorr
 from api.model_service import ModelService, ModelNotFoundError
 from api.db import EventStore
 from api.spatial import load_towers, TowerAttributor, EpicenterWeightedAttributor, LiveCorrelationEngine
-from api.exposure import attach_exposure, rank_priority, records_with_nulls
+from api.exposure import attach_exposure, pop_2km_by_tower, rank_priority, records_with_nulls
 from api.incidents import build_incidents, INCIDENT_WINDOW_SECONDS, INCIDENT_DISTANCE_KM
 from api.spatial_stats import compute_autocorrelation
 from api.replay import ReplayManager, EventBus, list_run_ids
@@ -562,8 +562,8 @@ async def incidents(limit: int = Query(default=2000, le=2000)):
     events_rows = app.state.event_store.recent_events(limit=limit)
     event_ids = [e["id"] for e in events_rows]
     feedback_by_event = app.state.event_store.feedback_for_events(event_ids)
-    pop_2km_by_tower = app.state.towers.set_index("tower_key")["pop_2km"].dropna().to_dict()
-    grouped = build_incidents(events_rows, feedback_by_event, pop_2km_by_tower)
+    grouped = build_incidents(events_rows, feedback_by_event,
+                              pop_2km_by_tower(app.state.towers))
     return IncidentsResponse(
         incidents=grouped,
         window_seconds=INCIDENT_WINDOW_SECONDS,

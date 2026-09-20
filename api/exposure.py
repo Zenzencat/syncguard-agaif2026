@@ -127,6 +127,18 @@ def is_flagged(event: dict) -> tuple[bool, str]:
     return event.get("predicted_label") == "attack", GATE_THRESHOLD
 
 
+def pop_2km_by_tower(towers: pd.DataFrame) -> dict[str, float]:
+    """tower_key -> ESTIMATED people within 2 km, for the towers that have an estimate.
+
+    Tolerates a tower table with no exposure columns at all (one that never went through
+    attach_exposure, e.g. a fresh benchmark server without the exposure CSV): that is "no
+    population data available", so it returns {} rather than raising KeyError.
+    """
+    if "pop_2km" not in towers.columns or "tower_key" not in towers.columns:
+        return {}
+    return towers.set_index("tower_key")["pop_2km"].dropna().to_dict()
+
+
 def rank_priority(latest_by_tower: dict[str, dict], towers: pd.DataFrame,
                   threshold: float = DEFAULT_THRESHOLD) -> dict:
     """Gate-then-rank over the latest event per tower.
@@ -152,7 +164,9 @@ def rank_priority(latest_by_tower: dict[str, dict], towers: pd.DataFrame,
             t = by_key.loc[tower_key]
             site_id, site_name = t["site_id"], t["site_name"]
             lat, lon = float(t["lat"]), float(t["lon"])
-            pop_1km, pop_2km = _pop_int(t["pop_1km"]), _pop_int(t["pop_2km"])
+            # .get: a tower table without exposure columns (e.g. a benchmark/synthetic
+            # registry that never went through attach_exposure) means "no data", not a 500.
+            pop_1km, pop_2km = _pop_int(t.get("pop_1km")), _pop_int(t.get("pop_2km"))
         else:
             # An event attributed to a tower_key the table does not know. Cannot happen via
             # /ingest (unknown towers are rejected) or replay; kept visible rather than dropped.
