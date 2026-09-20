@@ -11,6 +11,7 @@ import csv
 import io
 import json
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -29,7 +30,7 @@ from api.db import EventStore
 from api.spatial import load_towers, TowerAttributor, EpicenterWeightedAttributor, LiveCorrelationEngine
 from api.exposure import attach_exposure, pop_2km_by_tower, rank_priority, records_with_nulls
 from api.incidents import build_incidents, INCIDENT_WINDOW_SECONDS, INCIDENT_DISTANCE_KM
-from api.spatial_stats import compute_autocorrelation
+from api.spatial_stats import compute_autocorrelation, warmup as warmup_autocorrelation
 from api.replay import ReplayManager, EventBus, list_run_ids
 from api.ingest import IngestService, UnknownTowerError
 from api.auth import ApiKeyAuth, SESSION_COOKIE, API_KEY_HEADER
@@ -121,6 +122,20 @@ async def lifespan(app: FastAPI):
         app.state.model_service, app.state.event_store, app.state.replay_attributors,
         app.state.correlation_engine, app.state.event_bus,
     ) if app.state.model_service else None
+
+    # esda's first Moran computation costs ~16 s (numba JIT, MEASURED -- see api/spatial_stats.py
+    # ::warmup). Pay it now, in a daemon thread so startup is not delayed, instead of during the
+    # first /spatial/autocorrelation poll. Best-effort: a failure only means the first real call
+    # is slow again, so it is logged and never fatal.
+    def _warm_autocorrelation():
+        try:
+            log.info("autocorrelation warmup done",
+                     extra={"seconds": round(warmup_autocorrelation(), 2)})
+        except Exception as exc:  # noqa: BLE001 -- best-effort warmup
+            log.warning("autocorrelation warmup failed", extra={"error": repr(exc)})
+    app.state.autocorr_warmup = threading.Thread(
+        target=_warm_autocorrelation, name="autocorr-warmup", daemon=True)
+    app.state.autocorr_warmup.start()
 
     ms = app.state.model_service
     if ms is not None:
@@ -760,7 +775,10 @@ async def spatial_autocorrelation():
     hand-rolled live correlation in api/spatial.py and the offline SIMULATED-epicenter layer
     in build_spatial_simulation.py -- neither of those is touched by this endpoint."""
     latest = app.state.event_store.latest_severity_per_tower()
-    result = compute_autocorrelation(app.state.towers, latest)
+    # 999-permutation Moran + LISA is CPU-bound (tens of ms warm, seconds cold); run it in a
+    # worker thread so it can never stall the event loop -- and with it SSE and every other
+    # request -- during a demo.
+    result = await asyncio.to_thread(compute_autocorrelation, app.state.towers, latest)
     return AutocorrelationResponse(**result.__dict__)
 
 

@@ -32,6 +32,8 @@ result instead of a misleading early number.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
+import threading
+import time
 import numpy as np
 import pandas as pd
 
@@ -45,6 +47,13 @@ N_PERMUTATIONS = 999
 RNG_SEED = 42             # same convention as ROBUSTNESS_NOTES.md / train_improved_model.py
 SIGNIFICANCE_ALPHA = 0.05
 EARTH_RADIUS_KM = 6371.0088  # identical constant to api/spatial.py's haversine_km
+
+# The permutation tests below reseed numpy's GLOBAL RNG immediately before the call (esda's
+# Moran has no seed= parameter). compute_autocorrelation() now runs in a worker thread (see
+# api/main.py), and warmup() runs in another at startup, so two computations could interleave
+# their reseed and draw -- silently breaking the bit-identical reproducibility documented in
+# SPATIAL_STATISTICS.md. Serialising the reseed+draw section makes that impossible.
+_COMPUTE_LOCK = threading.Lock()
 
 # esda's Moran_Local quadrant convention (verified empirically, not just from docs -- see
 # SPATIAL_STATISTICS.md's worked example): 1=HH, 2=LH, 3=LL, 4=HL. 0 is this module's own
@@ -80,6 +89,29 @@ def build_knn_weights(towers_subset: pd.DataFrame, k: int) -> KNN:
     w = KNN.from_array(coords, k=k, radius=EARTH_RADIUS_KM)
     w.transform = "r"
     return w
+
+
+def warmup() -> float:
+    """Run one throwaway computation on a small SYNTHETIC tower grid and return the seconds it
+    took. Not a result anyone sees -- it exists only to pay esda's one-time first-call cost
+    (numba JIT compilation of the permutation kernels, MEASURED at ~16 s on the first request
+    of a fresh server; see Item B2 in the report) at startup instead of during the first
+    dashboard poll. Nothing here is written to the store or returned by any endpoint."""
+    n = MIN_TOWERS_FOR_STATS + 5
+    side = 5
+    towers = pd.DataFrame({
+        "tower_key": [f"WARMUP_{i}" for i in range(n)],
+        "site_id": [f"WARMUP_{i}" for i in range(n)],
+        "site_name": [f"warmup {i}" for i in range(n)],
+        "lat": [0.001 * (i // side) for i in range(n)],
+        "lon": [0.001 * (i % side) for i in range(n)],
+    })
+    latest = {f"WARMUP_{i}": {"severity": 0.1 + 0.8 * ((i * 7) % 10) / 10.0} for i in range(n)}
+    t0 = time.perf_counter()
+    result = compute_autocorrelation(towers, latest)
+    if not result.computable:  # cannot happen with the fixture above; fail loudly if it does
+        raise RuntimeError(f"autocorrelation warmup was not computable: {result.reason}")
+    return time.perf_counter() - t0
 
 
 def compute_autocorrelation(towers: pd.DataFrame, latest_by_tower: dict[str, dict]) -> AutocorrelationResult:
@@ -120,9 +152,10 @@ def compute_autocorrelation(towers: pd.DataFrame, latest_by_tower: dict[str, dic
     # give bit-identical I and p_sim. Moran_Local *does* take seed= directly (and n_jobs=1,
     # passed explicitly here even though it's already the default, for the same determinism
     # discipline as api/model_service.py).
-    np.random.seed(RNG_SEED)
-    global_mi = Moran(severities, w, permutations=N_PERMUTATIONS)
-    local_mi = Moran_Local(severities, w, permutations=N_PERMUTATIONS, seed=RNG_SEED, n_jobs=1)
+    with _COMPUTE_LOCK:
+        np.random.seed(RNG_SEED)
+        global_mi = Moran(severities, w, permutations=N_PERMUTATIONS)
+        local_mi = Moran_Local(severities, w, permutations=N_PERMUTATIONS, seed=RNG_SEED, n_jobs=1)
 
     per_tower = []
     for i, tower_key in enumerate(present_keys):
