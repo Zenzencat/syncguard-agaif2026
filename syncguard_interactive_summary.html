@@ -86,6 +86,7 @@
   .kpi-strip .stat .v{font-size:26px;}
   .kpi-strip .stat.hero{padding-right:8px;}
   .kpi-strip .stat.hero .v{font-size:56px; color:var(--ink); letter-spacing:-.02em; line-height:1;}
+  .kpi-strip .stat.hero .pill{font-size:18px; padding:8px 14px;}
   .kpi-strip .stat .l{display:flex; align-items:center;}
   .data-mode{margin-left:auto; align-self:center; padding:8px 12px; border:1px solid var(--rule); background:var(--panel); color:var(--ink); font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase;}
   .stat{min-width:0;}
@@ -125,13 +126,14 @@
   .spatial-analysis .note{font-size:11px; color:var(--muted); max-width:760px;}
 
   /* Detector evidence panel */
-  .panel-eval{grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr); gap:7px 22px; padding:9px clamp(14px,3vw,32px) 11px;}
+  .panel-eval{grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr) auto; gap:7px 22px; padding:9px clamp(14px,3vw,32px) 11px;}
   .panel-eval .panel-bar,.panel-eval .stat-row{grid-column:1 / -1;}
   /* Keep the two tables as one compact group, centered as a unit against the chart — filling
      the column height without spreading the tables apart. */
   .eval-left{grid-column:1; grid-row:3; min-height:0; overflow:auto; display:flex; flex-direction:column; justify-content:flex-start; gap:10px;}
   .eval-block{flex:0 0 auto; display:flex; flex-direction:column; gap:6px;}
   .eval-right{grid-column:2; grid-row:3; min-height:0; display:flex; flex-direction:column; gap:4px;}
+  .detector-footer{grid-column:1 / -1; font-size:11px; color:var(--muted); border-top:1px solid var(--rule-soft); padding-top:5px;}
 
   /* Prioritize panel: detector state is the gate; ESTIMATED nearby population is the rank. */
   .panel-priority{grid-template-columns:1fr; grid-template-rows:auto auto minmax(0,1fr) auto; gap:9px; padding:9px clamp(14px,3vw,32px) 11px;}
@@ -170,7 +172,7 @@
   @media (max-width:1000px){
     .panel-live{grid-template-columns:1fr; grid-template-rows:auto minmax(200px,1.2fr) minmax(200px,1fr);}
     .map-col{grid-column:1; grid-row:2;} .side-col{grid-column:1; grid-row:3;}
-    .panel-eval{grid-template-columns:1fr; grid-template-rows:auto auto auto minmax(200px,1fr);}
+    .panel-eval{grid-template-columns:1fr; grid-template-rows:auto auto auto minmax(200px,1fr) auto;}
     .eval-left{grid-column:1; grid-row:3;} .eval-right{grid-column:1; grid-row:4;}
   }
 
@@ -322,16 +324,13 @@
 </header>
 
 <section class="kpi-strip" aria-label="Headline numbers">
-  <div class="kpi-group real">
-    <div class="kpi-eyebrow">Real · detector, held-out</div>
-    <div class="kpi-tiles" id="kpi-static"></div>
-  </div>
   <div class="kpi-group live">
     <div class="kpi-eyebrow">Session activity</div>
     <div class="kpi-tiles">
-      <div class="stat"><div class="v" id="replay-count">0</div><div class="l">events scored this session</div></div>
+      <div class="stat hero"><div class="v"><span class="pill normal" id="alert-pill"><span class="dot"></span><span id="alert-pill-text">normal</span></span></div><div class="l">Alert state <span class="has-pop"><button type="button" class="info" aria-label="Alert state: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Debounced over this recording's real reading sequence — 3 consecutive above-threshold readings to alert, 5 below to clear. Not naive per-event flagging.</span></span></span></span></div></div>
+      <div class="stat"><div class="v" id="active-alerts">0</div><div class="l">active alerts</div></div>
       <div class="stat"><div class="v" id="flagged-towers">0</div><div class="l">flagged towers</div></div>
-      <div class="stat"><div class="v"><span class="pill normal" id="alert-pill"><span class="dot"></span><span id="alert-pill-text">normal</span></span></div><div class="l">Alert state <span class="has-pop"><button type="button" class="info" aria-label="Alert state: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Debounced over this recording's real reading sequence — 3 consecutive above-threshold readings to alert, 5 below to clear. Not naive per-event flagging.</span></span></span></span></div></div>
+      <div class="stat"><div class="v" id="replay-count">0</div><div class="l">events scored this session</div></div>
     </div>
   </div>
   <div class="data-mode" id="data-mode">THIS SESSION</div>
@@ -467,6 +466,7 @@
       <h3 class="h3-row">Feature importance <span class="has-pop"><button type="button" class="info" aria-label="Feature importance: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">RandomForest, 23 features total.</span></span></span></span></h3>
       <div class="chart-fill"><div id="fi-chart"></div></div>
     </div>
+    <div class="detector-footer" id="detector-footer">Loading shipped-model metrics…</div>
   </section>
 
 </div>
@@ -726,16 +726,19 @@ function renderFI(){
 
 function renderEvaluation(det){
   const m = det.metrics, cm = det.confusion_matrix;
-  document.getElementById('kpi-static').innerHTML =
-    statTile((m.attack_recall*100).toFixed(1) + '%', 'Attack recall', 'hero') +
-    statTile((m.accuracy*100).toFixed(1) + '%', 'Accuracy') +
-    statTile((m.false_alarm_rate*100).toFixed(1) + '%', 'False-alarm rate on clean data');
   document.getElementById('headline-stats').innerHTML =
     statTile(det.model_display, 'Shipped detector') +
+    statTile((m.attack_recall*100).toFixed(1) + '%', 'Attack recall') +
+    statTile((m.accuracy*100).toFixed(1) + '%', 'Accuracy') +
+    statTile((m.false_alarm_rate*100).toFixed(1) + '%', 'False-alarm rate on clean data') +
     statTile(m.roc_auc.toFixed(3), 'ROC-AUC') +
     statTile(m.pr_auc.toFixed(3), 'PR-AUC') +
     statTile((m.attack_precision*100).toFixed(1) + '%', 'Attack precision') +
     statTile(m.total_support, `Held-out rows · ${det.held_out_recordings} recordings`);
+  document.getElementById('detector-footer').textContent =
+    `Detector v2, threshold ${det.decision_threshold.toFixed(2)}. Held-out: ` +
+    `${(m.attack_recall*100).toFixed(1)}% attack recall, ` +
+    `${(m.false_alarm_rate*100).toFixed(0)}% false-alarm rate on clean data`;
   document.getElementById('cm-table').innerHTML = `
     <tr><th></th><th>Pred: clean</th><th>Pred: attack</th></tr>
     <tr><th>True: clean</th><td class="diag">${cm.tn}</td><td class="offdiag">${cm.fp}</td></tr>
@@ -749,7 +752,6 @@ function renderEvaluation(det){
   renderFI();
 }
 
-document.getElementById('kpi-static').innerHTML = statTile('—', 'Loading shipped-model evidence');
 // Repaint the static/offline charts when the theme toggles (live map handles itself below).
 document.addEventListener('themechange', () => { renderTimestep(currentTimestep); renderFI(); });
 </script>
@@ -781,6 +783,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   const feedbackPillEl = $('feedback-pill'), feedbackPrecisionEl = $('feedback-precision');
   const priorityListEl = $('priority-list'), prioritySummaryEl = $('priority-summary');
   const dataModeEl = $('data-mode'), flaggedTowersEl = $('flagged-towers');
+  const activeAlertsEl = $('active-alerts');
   // event_id -> the API's current feedback record. A cache in front of the API, never
   // a substitute for it: every panel open re-reads the server and repaints.
   const feedbackByEvent = new Map();
@@ -941,6 +944,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       showlegend:false,
     } : null;
     const alerting = active.filter(t => t.alert_state === 'alerting');
+    activeAlertsEl.textContent = alerting.length;
     const alertTrace = alerting.length ? {
       type:'scattergl', mode:'markers', x: alerting.map(t=>t.lon), y: alerting.map(t=>t.lat),
       marker:{symbol:'diamond', size:11, color:'#A83232', line:{color:c.alertLine, width:1.6}},

@@ -62,6 +62,18 @@ def test_dashboard_contains_no_hard_coded_detector_metrics(client):
     assert "false-alarm rate on clean data" in html.lower()
 
 
+def test_global_header_is_operational_and_detector_summary_stays_on_evidence_tab(client):
+    html = client.get("/dashboard").text
+    header = html.split('<section class="kpi-strip"', 1)[1].split("</section>", 1)[0]
+    assert "kpi-static" not in header
+    assert "Real · detector, held-out" not in header
+    for element_id in ("alert-pill", "active-alerts", "flagged-towers", "replay-count", "data-mode"):
+        assert f'id="{element_id}"' in header
+    assert 'id="detector-footer"' in html
+    assert "m.attack_recall" in html
+    assert "m.false_alarm_rate" in html
+
+
 def test_plain_feature_names_cover_the_operator_groups():
     assert plain_feature_name("agc_cnt_mean").startswith("Receiver gain control")
     assert plain_feature_name("snr_l1_mean").startswith("Signal-to-noise ratio")
