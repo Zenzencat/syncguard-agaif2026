@@ -478,6 +478,38 @@ python evaluate_models.py         # recompute the TEST-set table above from the 
 python build_spatial_simulation.py  # offline SIMULATED spatial layer -> spatial_processed/
 ```
 
+### Bundled assets a clean clone cannot fully regenerate
+
+Two committed assets cannot be regenerated from a clean clone alone: the basemap image (the
+`tools/basemap_cache/` OpenStreetMap extracts it is built from are untracked, so rebuilding needs
+a fresh Overpass fetch) and the per-tower population-exposure table (its source population raster
+is not in the repository and no script for it is included). Details:
+
+- **The basemap PNG lives inside `assets/offline_basemap.geojson`.** The image is embedded as a
+  base64 `raster` member of that GeoJSON file — a deliberate workaround, because `api/` serves a
+  fixed list of asset files and was frozen during the finale build. A dedicated asset route
+  (serving the PNG as its own file) is the post-freeze fix.
+- **`tools/basemap_cache/` is untracked** (about 19 MB of OpenStreetMap Overpass extracts, kept on
+  the build machine only). A fresh clone therefore cannot re-run
+  `python tools/build_basemap_raster.py --from-cache`; it has to re-fetch from Overpass (network
+  access, and Overpass being available), and because OpenStreetMap keeps changing the rebuilt image
+  will not be pixel-identical to the shipped one. The shipped asset itself needs none of this to run.
+- **Re-running `tools/build_basemap.py` overwrites the whole asset,** including the embedded
+  raster. Run `python tools/build_basemap_raster.py --from-cache` afterwards (with the cache in
+  place, or without `--from-cache` to re-fetch) to put the image back.
+- **`spatial_processed/tower_exposure_HRSL.csv` is an input, not an output of any script here.**
+  It was computed from the Meta Data for Good / CIESIN High Resolution Population Density GeoTIFF
+  (HDX, CC BY 4.0, about 2020), which is not included and has no committed build script. To
+  regenerate it you would need to download that raster yourself and sum it within 1 km and 2 km of
+  each of the 136 tower coordinates (columns `pop_within_1km`, `px_within_1km`, `pop_within_2km`,
+  `px_within_2km`); until then the committed table is the only copy. See
+  [`spatial_processed/EXPOSURE_ATTRIBUTION.md`](spatial_processed/EXPOSURE_ATTRIBUTION.md).
+- **`build_spatial_simulation.py` *is* re-runnable from a clean clone** (checked on a fresh
+  `git clone`: it exits 0 in seconds), because the tower CSV (`spatial_raw/…/menaratelepon_ar_50k.csv`)
+  and `processed/syncguard_features.parquet` are both committed. Its outputs are SIMULATED and
+  overwrite `spatial_processed/*_SIMULATED.*`. The tower CSV's redistribution rights are
+  unconfirmed — see the licensing note above.
+
 **Feature provenance, quirks, and the abandoned FGI-JSDR/MATLAB plan:** [`dataset_notes.md`](dataset_notes.md).
 
 ---
