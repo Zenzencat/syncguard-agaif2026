@@ -1142,6 +1142,12 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     activeAlertsEl.textContent = alerting.length;
     if(nocActiveAlertsEl) nocActiveAlertsEl.textContent = alerting.length;
     refreshSilentTowers();
+    // Alert state pill: derived from the same active-alerts count shown right next to it,
+    // not from whichever event's alert_state happened to arrive last over SSE -- that could
+    // show "normal" beside "4 active alerts" whenever the most recent message wasn't itself
+    // from an alerting tower, even while others still were.
+    alertPillEl.className = 'pill ' + (alerting.length ? 'alerting' : 'normal');
+    alertPillTextEl.textContent = alerting.length ? 'alerting' : 'normal';
     const alertTrace = alerting.length ? {
       type:'scattergl', mode:'markers', x: alerting.map(t=>t.lon), y: alerting.map(t=>t.lat),
       marker:{symbol:'diamond', size:11, color:'#A83232', line:{color:c.alertLine, width:1.6}},
@@ -1742,10 +1748,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       logEvent(ev);
       sessionCount += 1;
       countEl.textContent = sessionCount;
-      if(ev.alert_state){
-        alertPillEl.className = 'pill ' + ev.alert_state;
-        alertPillTextEl.textContent = ev.alert_state;
-      }
+      // Alert pill is set inside renderLiveMap() above, derived from the active-alerts
+      // count -- not from ev.alert_state, which is a single event's/single recording's own
+      // hysteresis state and could disagree with "N active alerts" shown right next to it.
     };
     eventSource.onerror = () => setStatus('bad', 'stream disconnected — click Connect to retry');
   }
