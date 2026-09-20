@@ -4,8 +4,8 @@ layer (that script, its outputs in spatial_processed/, and spatial_layer_notes.m
 untouched by this module).
 
 What is REAL here:
-  - The 136 Telkomsel tower coordinates/site metadata (same source as the offline layer:
-    spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv).
+  - The 136 real telecom tower coordinates/site metadata, operator labels mixed (same source
+    as the offline layer: spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv).
   - The haversine distance computation between towers.
   - The correlation itself: when a tower's live-scored severity crosses a threshold, its
     correlation score is a genuine distance-weighted aggregate of *other real towers'
@@ -14,18 +14,23 @@ What is REAL here:
     high in the same window, that's what drives this tower's correlation score up; if none
     do, it doesn't, regardless of distance.
 
-What is SIMULATED here (see TowerAttributor and SpatiallyPersistentAttributor below):
+What is SIMULATED here (see TowerAttributor, SpatiallyPersistentAttributor and
+EpicenterWeightedAttributor below):
   - Which physical tower a given scored event "comes from". The Jammertest 2024 dataset is a
     single receiver's log, not a multi-tower deployment, so there is no real per-event tower
-    attribution to use, and no ground-truth fix is possible for either mechanism below -- the
+    attribution to use, and no ground-truth fix is possible for any mechanism below -- the
     events happened at a test range in Norway, the towers are real infrastructure in
-    Indonesia. Two SIMULATED attribution mechanisms are available: `TowerAttributor`
-    (deterministic round-robin cycling, memoryless, no relationship to geography) and
-    `SpatiallyPersistentAttributor` (a biased random walk over real tower geometry, encoding
-    the one real, disclosed assumption that sustained attacks persist and drift locally rather
-    than teleporting). Both are clearly SIMULATED and documented as such everywhere this
-    module's output surfaces (API response, DB column comments, dashboard); see
-    SPATIAL_STATISTICS.md for the honest Moran's I result each one produces.
+    Indonesia. Three SIMULATED attribution mechanisms are available: `TowerAttributor`
+    (deterministic round-robin cycling, memoryless, no relationship to geography -- the API
+    default), `SpatiallyPersistentAttributor` (a biased random walk over real tower geometry
+    from a random starting tower, encoding the one real, disclosed assumption that sustained
+    attacks persist and drift locally rather than teleporting), and
+    `EpicenterWeightedAttributor` (the same persistent walk, anchored to start at a fixed
+    simulated epicenter -- what the dashboard's NOC tab requests, so its incident queue has
+    something spatially localized to group). All three are clearly SIMULATED and documented
+    as such everywhere this module's output surfaces (API response, DB column comments,
+    dashboard); see SPATIAL_STATISTICS.md for the honest Moran's I result the first two
+    produce.
   - The exponential distance-decay weighting function and its decay constant, same as the
     offline layer: a documented simplifying assumption standing in for "nearby infrastructure
     sharing correlated GNSS timing anomalies," not a measured RF propagation model.
@@ -144,12 +149,22 @@ class SpatiallyPersistentAttributor:
     """
 
     def __init__(self, towers: pd.DataFrame, stay_prob: float = STAY_PROBABILITY,
-                 k: int = ATTRIBUTION_K_NEIGHBORS, seed: int | None = None):
+                 k: int = ATTRIBUTION_K_NEIGHBORS, seed: int | None = None,
+                 start_tower_key: str | None = None):
+        """`start_tower_key`: if given, the walk's first tower is fixed to this tower_key
+        instead of a uniformly random one -- used by EpicenterWeightedAttributor below to
+        anchor the walk's start at a fixed simulated epicenter while keeping this class's
+        real k-NN persistence for every step after that."""
         self._towers = towers.reset_index(drop=True)
         self._stay_prob = stay_prob
         self._k = k
         self._rng = np.random.default_rng(seed)
         self._current_idx: int | None = None
+        self._start_idx: int | None = None
+        if start_tower_key is not None:
+            matches = self._towers.index[self._towers["tower_key"] == start_tower_key]
+            if len(matches):
+                self._start_idx = int(matches[0])
         self._neighbor_idx, self._neighbor_weights = self._build_neighbor_table()
 
     def _build_neighbor_table(self) -> tuple[np.ndarray, np.ndarray]:
@@ -172,7 +187,8 @@ class SpatiallyPersistentAttributor:
 
     def next_tower(self) -> dict:
         if self._current_idx is None:
-            self._current_idx = int(self._rng.integers(0, len(self._towers)))
+            self._current_idx = (self._start_idx if self._start_idx is not None
+                                 else int(self._rng.integers(0, len(self._towers))))
         elif self._rng.random() >= self._stay_prob:
             candidates = self._neighbor_idx[self._current_idx]
             weights = self._neighbor_weights[self._current_idx]
@@ -188,6 +204,53 @@ class SpatiallyPersistentAttributor:
     @property
     def towers(self) -> pd.DataFrame:
         return self._towers
+
+
+class EpicenterWeightedAttributor(SpatiallyPersistentAttributor):
+    """SIMULATED, alternative to TowerAttributor: a real k-NN persistent walk (see
+    SpatiallyPersistentAttributor above -- same stay/move mechanism, same real haversine
+    neighbor table) anchored to start at a fixed simulated epicenter instead of a uniformly
+    random tower, so a live replay reads as "an attack starting near <epicenter> and
+    drifting locally" instead of round-robin's structurally-random spread across all 136
+    towers. This exists so the NOC incident queue (api/incidents.py, which requires nearby
+    towers AND nearby time to join one incident) has something spatially coherent to group
+    under live replay -- round-robin stays the API default and is what tests / the
+    spatial-statistics results still exercise.
+
+    v1 of this class independently redrew a tower every event, weighted by
+    exp(-distance_from_epicenter_km / decay_km) (the same decay narrative
+    build_spatial_simulation.py uses for the static Severity Map). MEASURED on a fresh
+    database, default Spoofing 2.1.1 replay: that gave 742 incidents (mean 2.56 events each,
+    54% single-event) -- an improvement on round-robin's 1,695, but nowhere near a usably
+    small, localized incident count, because independent per-draw sampling does not make
+    *consecutive* draws land near each other, even when each draw individually favors the
+    epicenter's neighborhood. Anchoring SpatiallyPersistentAttributor's already-real,
+    already-measured (SPATIAL_STATISTICS.md) persistence mechanism at the epicenter fixes
+    that: consecutive events now share a real tower or one of its real nearest neighbors far
+    more often, by construction.
+
+    The epicenter is picked the same way build_spatial_simulation.py picks it -- the real
+    tower nearest the geometric centroid of all 136 real tower coordinates, deterministic,
+    not cherry-picked -- computed independently here rather than importing that script
+    (a standalone plotting/report tool, not a library, and left untouched).
+
+    Still SIMULATED tower attribution: there is no real per-event link between a Norway
+    test-range GNSS recording and any Indonesian tower. This changes only which placeholder
+    mechanism generates that attribution.
+    """
+
+    def __init__(self, towers: pd.DataFrame, stay_prob: float = STAY_PROBABILITY,
+                 k: int = ATTRIBUTION_K_NEIGHBORS, seed: int | None = None):
+        towers = towers.reset_index(drop=True)
+        lats = towers["lat"].to_numpy()
+        lons = towers["lon"].to_numpy()
+        centroid_lat, centroid_lon = float(lats.mean()), float(lons.mean())
+        d_to_centroid = haversine_km(centroid_lat, centroid_lon, lats, lons)
+        epicenter_idx = int(np.argmin(d_to_centroid))
+        self.epicenter_tower_key = towers.iloc[epicenter_idx]["tower_key"]
+        self.epicenter_site_name = towers.iloc[epicenter_idx]["site_name"]
+        super().__init__(towers, stay_prob=stay_prob, k=k, seed=seed,
+                         start_tower_key=self.epicenter_tower_key)
 
 
 @dataclass

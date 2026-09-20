@@ -108,5 +108,5 @@ def test_dashboard_assets_are_local_and_served(client):
     assert basemap.status_code == 200
     body = basemap.json()
     assert body["type"] == "FeatureCollection"
-    assert body["attribution"] == "Natural Earth, public domain"
-    assert body["features"], "the offline land/coastline layer must not be empty"
+    assert body["attribution"] == "(c) OpenStreetMap contributors (ODbL)"
+    assert body["features"], "the offline vector basemap layer must not be empty"

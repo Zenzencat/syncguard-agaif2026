@@ -112,13 +112,62 @@
   .tab-panel{position:absolute; inset:0; overflow:hidden; display:none;}
   .tab-panel.active{display:grid;}
 
-  /* Live operations panel */
-  .panel-live{grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); gap:9px 16px; padding:9px clamp(14px,3vw,32px) 11px;}
-  .panel-live .ctl-bar{grid-column:1 / -1; margin:0;}
-  .map-col{grid-column:1; grid-row:2; display:flex; flex-direction:column; min-height:0; gap:5px;}
-  .side-col{grid-column:2; grid-row:2; display:flex; flex-direction:column; min-height:0; gap:7px;}
-  .log-wrap{flex:1.2 1 0; min-height:0; display:flex; flex-direction:column;}
-  .shap-wrap{flex:1 1 0; min-height:0; display:flex; flex-direction:column;}
+  /* NOC panel (formerly "Live operations") */
+  .panel-live{grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr); gap:7px 16px; padding:9px clamp(14px,3vw,32px) 11px;}
+  .panel-live .ctl-bar{grid-column:1 / -1; grid-row:1; margin:0;}
+  .noc-overview{grid-column:1 / -1; grid-row:2; display:flex; align-items:center; gap:8px 22px; flex-wrap:wrap; padding:6px 10px; background:var(--wash); border-left:3px solid var(--green);}
+  .noc-overview .stat{display:flex; align-items:baseline; gap:6px;}
+  .noc-overview .v{font:700 20px/1 var(--font-mono); color:var(--ink);}
+  .noc-overview .l{font-size:11px; color:var(--muted); display:flex; align-items:center; gap:3px;}
+  .map-col{grid-column:1; grid-row:3; display:flex; flex-direction:column; min-height:0; gap:5px;}
+  .side-col{grid-column:2; grid-row:3; display:flex; flex-direction:column; min-height:0; gap:7px;}
+  .map-attribution{font-size:10px; color:var(--muted);}
+  .log-wrap{min-height:0; display:flex; flex-direction:column;}
+  .shap-wrap{min-height:0; display:flex; flex-direction:column;}
+
+  /* Incident queue + detail */
+  .incident-wrap{flex:1.3 1 0; min-height:0; display:flex; flex-direction:column;}
+  .incident-detail-wrap{flex:1.1 1 0; min-height:0; display:flex; flex-direction:column;}
+  #incident-queue{flex:1 1 auto; min-height:0; overflow-y:auto; background:var(--panel-2); border:1px solid var(--rule-soft);}
+  .incident-row{display:grid; grid-template-columns:1fr auto; gap:2px 10px; padding:7px 10px; border-bottom:1px solid var(--rule-soft); cursor:pointer;}
+  .incident-row:last-child{border-bottom:0;}
+  .incident-row:hover{background:var(--wash);}
+  .incident-row.selected{background:var(--blue-tint); border-left:3px solid var(--blue);}
+  .incident-row .ir-top{display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:700; color:var(--ink);}
+  .incident-row .ir-meta{grid-column:1/-1; display:flex; gap:10px 14px; flex-wrap:wrap; font-size:11px; color:var(--muted); font-family:var(--font-mono);}
+  .incident-status{font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; padding:2px 7px; border-radius:2px;}
+  .incident-status.new{background:var(--orange-tint,var(--wash)); color:var(--orange-text);}
+  .incident-status.confirmed{background:var(--red-tint); color:var(--red);}
+  .incident-status.dismissed{background:var(--panel-2); color:var(--muted); border:1px solid var(--rule);}
+  .incident-empty,.incident-error{padding:20px; color:var(--muted); text-align:center; font-size:12px;}
+  #incident-detail{flex:1 1 auto; min-height:0; overflow-y:auto; background:var(--panel-2); border:1px solid var(--rule-soft); padding:9px 12px; font-size:12.5px;}
+  #incident-detail .ph{color:var(--ink-2);}
+  .incident-signals .shap-bar-row{grid-template-columns:130px 1fr 54px;}
+  .incident-impact{display:flex; flex-direction:column; gap:3px; font-size:12px; margin:8px 0; padding:7px 9px; background:var(--wash); border-left:3px solid var(--orange);}
+  .incident-checklist{margin:8px 0; font-size:12px;}
+  .incident-checklist ul{margin:4px 0 0; padding-left:18px;}
+  .incident-checklist li{margin:2px 0;}
+  .incident-actions{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:8px;}
+  .btn-copy{background:var(--panel); color:var(--ink-2); border:1px solid var(--rule); border-radius:3px; padding:5px 10px; font-size:11.5px; font-weight:700; cursor:pointer;}
+  .btn-copy:hover{background:var(--wash); color:var(--ink);}
+  .btn-copy.copied{background:var(--green-tint); border-color:var(--green); color:var(--green);}
+  .incident-detail h4{margin:8px 0 2px; font-size:10.5px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.06em;}
+  .incident-detail .note-sm{font-size:10px; color:var(--muted);}
+  .incfb-row{display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin-top:4px;}
+  .incfb-state{font-size:11px; color:var(--ink-2); margin-left:2px;}
+  .incfb-state.err{color:var(--red);}
+  .incident-impact table{width:100%; font-size:11.5px; border-collapse:collapse; margin-top:4px;}
+  .incident-impact th{color:var(--muted); text-align:left; font-weight:700; font-size:10px; text-transform:uppercase;}
+  .incident-impact td,.incident-impact th{padding:2px 6px 2px 0;}
+  .incident-tag-sm{font-size:9px; padding:1px 5px;}
+  .ring.sel{border-color:var(--blue); border-style:dashed;}
+
+  .raw-log-details{flex:0 0 auto; border:1px solid var(--rule-soft); background:var(--panel-2);}
+  .raw-log-details summary{cursor:pointer; padding:6px 10px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);}
+  .raw-log-details[open]{flex:1.6 1 0; min-height:0; display:flex; flex-direction:column; overflow:hidden;}
+  .raw-log-details[open] summary{flex:0 0 auto;}
+  .raw-log-details[open] .log-wrap{flex:1.1 1 0; min-height:0;}
+  .raw-log-details[open] .shap-wrap{flex:1 1 0; min-height:0;}
 
   /* Severity map panel */
   .panel-map{grid-template-columns:1fr; grid-template-rows:auto auto auto minmax(0,1fr) auto; gap:7px; padding:9px clamp(14px,3vw,32px) 11px;}
@@ -170,8 +219,8 @@
   h3.h3-row{display:block;}
 
   @media (max-width:1000px){
-    .panel-live{grid-template-columns:1fr; grid-template-rows:auto minmax(200px,1.2fr) minmax(200px,1fr);}
-    .map-col{grid-column:1; grid-row:2;} .side-col{grid-column:1; grid-row:3;}
+    .panel-live{grid-template-columns:1fr; grid-template-rows:auto auto minmax(200px,1.2fr) minmax(200px,1fr);}
+    .map-col{grid-column:1; grid-row:3;} .side-col{grid-column:1; grid-row:4;}
     .panel-eval{grid-template-columns:1fr; grid-template-rows:auto auto auto minmax(200px,1fr) auto;}
     .eval-left{grid-column:1; grid-row:3;} .eval-right{grid-column:1; grid-row:4;}
   }
@@ -314,7 +363,7 @@
     <div class="hdr-right">
       <div class="legend">
         <span class="legend-key">Data provenance <span class="has-pop"><button type="button" class="info" aria-label="Data provenance: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">hover a badge for detail — each tab restates only what differs</span></span></span></span></span>
-        <span class="tag real has-pop"><span>REAL</span><button type="button" class="info" aria-label="REAL: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Jammertest 2024 GNSS recordings, 136 Telkomsel tower sites (Kubu Raya / Pontianak, Indonesia), RandomForest detector evidence</span></span></span></span>
+        <span class="tag real has-pop"><span>REAL</span><button type="button" class="info" aria-label="REAL: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Jammertest 2024 GNSS recordings, 136 real telecom tower locations (Kubu Raya / Pontianak, Indonesia), operator labels mixed, RandomForest detector evidence</span></span></span></span>
         <span class="tag sim has-pop"><span>SIMULATED</span><button type="button" class="info" aria-label="SIMULATED: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Offline map: spoofing epicenter, distance-decay severity, spread over time, priority ranking — documented simulation</span></span></span></span>
       <span class="tag live has-pop"><span>SESSION</span><button type="button" class="info" aria-label="Session data: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">The data-mode banner states whether events are recorded-log replay, recent receiver ingest, or only this stored session.</span></span></span></span>
       </div>
@@ -337,15 +386,15 @@
 </section>
 
 <nav class="tabs" role="tablist" aria-label="Dashboard views">
-  <button type="button" class="tab-btn live active" data-tab="live" aria-selected="true"><span class="dotc"></span>Live Operations</button>
+  <button type="button" class="tab-btn live active" data-tab="live" aria-selected="true"><span class="dotc"></span>NOC</button>
   <button type="button" class="tab-btn sim" data-tab="priority" aria-selected="false"><span class="dotc"></span>Prioritize</button>
-  <button type="button" class="tab-btn sim" data-tab="map" aria-selected="false"><span class="dotc"></span>Severity Map</button>
-  <button type="button" class="tab-btn real" data-tab="eval" aria-selected="false"><span class="dotc"></span>Detector Evidence</button>
+  <button type="button" class="tab-btn sim" data-tab="map" aria-selected="false"><span class="dotc"></span>Spatial analysis</button>
+  <button type="button" class="tab-btn real" data-tab="eval" aria-selected="false"><span class="dotc"></span>About the detector</button>
 </nav>
 
 <div class="tabwrap">
 
-  <section class="tab-panel panel-live active" id="tab-live" role="tabpanel" aria-label="Live operations">
+  <section class="tab-panel panel-live active" id="tab-live" role="tabpanel" aria-label="NOC">
     <div class="ctl-bar">
       <span class="tag live has-pop"><span>SESSION</span><button type="button" class="info" aria-label="Session data: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Requires the SyncGuard API running (api/main.py). The banner above distinguishes recorded-log replay from recent receiver ingest.</span><span class="pop-label">Scope of claim</span><span class="pop-p">Replay streams <code>syncguard_features.parquet</code> row-by-row through the shipped detector. Probability and severity are real model output; replay tower attribution is SIMULATED round-robin because the receiver dataset has no per-tower mapping.</span></span></span></span>
       <div class="api-row">
@@ -377,34 +426,52 @@
       </div>
     </div>
 
+    <div class="noc-overview" id="noc-overview" aria-label="NOC overview">
+      <div class="stat"><div class="v" id="noc-active-alerts">0</div><div class="l">active alerts</div></div>
+      <div class="stat"><div class="v" id="noc-flagged-towers">0</div><div class="l">flagged towers</div></div>
+      <div class="stat"><div class="v" id="noc-silent-towers">0</div><div class="l">silent towers <span class="has-pop"><button type="button" class="info" aria-label="Silent towers: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Real towers with no scored reading yet this session -- not the same as "quiet/clean". A fresh session starts with all 136 silent.</span></span></span></span></div></div>
+      <div class="data-mode" id="noc-data-mode">THIS SESSION</div>
+    </div>
+
     <div class="map-col">
-      <h3 class="h3-row">Session tower map <span class="has-pop"><button type="button" class="info" aria-label="Session tower map: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Current session map (fill = severity; ring = significant LISA cluster/outlier; ◆ = alerting, hysteresis-confirmed). The data-mode banner identifies replay versus recent ingest.</span><span class="pop-p">A tower can show elevated (red) severity <em>without</em> a diamond — that's a single flickering reading, not yet confirmed. The diamond only appears after the debounce streak — see <code>OPERATIONAL_METRICS.md</code> for why naive per-event alerting would spam.</span></span></span></span></h3>
+      <h3 class="h3-row">Session tower map <span class="has-pop"><button type="button" class="info" aria-label="Session tower map: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Current session map (fill = severity; ring = significant LISA cluster/outlier; ◆ = alerting, hysteresis-confirmed). The data-mode banner identifies replay versus recent ingest.</span><span class="pop-p">A tower can show elevated (red) severity <em>without</em> a diamond — that's a single flickering reading, not yet confirmed. The diamond only appears after the debounce streak — see <code>OPERATIONAL_METRICS.md</code> for why naive per-event alerting would spam.</span><span class="pop-p">Selecting an incident below highlights that incident's towers on the map.</span></span></span></span></h3>
       <div class="lisa-legend">
         <span><i class="ring hh"></i>High-High hotspot</span>
         <span><i class="ring ll"></i>Low-Low coldspot</span>
         <span><i class="ring outlier"></i>Spatial outlier (High-Low / Low-High)</span>
         <span><i class="dia"></i>Alerting (hysteresis-confirmed)</span>
+        <span><i class="ring sel"></i>Selected incident</span>
       </div>
       <div class="chart-fill"><div id="live-map"></div></div>
+      <div class="map-attribution">Basemap: OpenStreetMap vector layer, bundled offline · (c) OpenStreetMap contributors (ODbL)</div>
     </div>
 
     <div class="side-col">
-      <div class="log-wrap">
-        <h3 class="h3-row">Live event log <span class="has-pop"><button type="button" class="info" aria-label="Live event log: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Most recent first.</span></span></span></span></h3>
-        <div id="live-log">
-          <div class="row head"><div>Time</div><div>Attack type</div><div>Tower</div><div>Severity</div><div>Correlation</div></div>
-        </div>
+      <div class="incident-wrap">
+        <h3 class="h3-row">Incident queue <span class="has-pop"><button type="button" class="info" aria-label="Incident queue: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Alerting (hysteresis-confirmed) events chained into one incident when consecutive readings are within the correlation window of each other in time -- not a spatial-clustering algorithm. Real deployments would group by shared timing source or region.</span><span class="pop-label">Status</span><span class="pop-p">New / Confirmed / Dismissed, from the same analyst labels as before -- confirming or dismissing an incident labels its single peak-severity event, not every reading in it.</span></span></span></span></h3>
+        <div id="incident-queue"><div class="ph">Connect to the SyncGuard API to load incidents.</div></div>
       </div>
-      <div class="shap-wrap">
-        <h3 class="h3-row">Why was this flagged? <span class="has-pop"><button type="button" class="info" aria-label="SHAP explanation: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Click a live-map marker or an event-log row to see the top features driving <em>that specific</em> prediction (exact Tree SHAP over the shipped RandomForest — signed contribution to the attack probability, not just a ranking). At replay speeds ≤20x, every event is explained live; faster than that, live explanation is skipped to keep replay at full speed, and an <b>Explain</b> button computes it on demand instead — see <code>SHAP_EXPLAINABILITY.md</code> for why and how this tradeoff is designed.</span></span></span></span></h3>
-        <div id="explain-panel"><span class="ph">Click a map marker or log row to see why it was flagged.</span></div>
-        <div id="feedback-strip">
-          <span class="fs-label">Analyst labels</span>
-          <span id="feedback-pill">—</span>
-          <span id="feedback-precision" class="fs-precision">precision —</span>
-          <a href="/feedback/export" id="feedback-export">Export CSV</a>
-        </div>
+      <div class="incident-detail-wrap" id="incident-detail-wrap">
+        <h3 class="h3-row">Incident detail</h3>
+        <div id="incident-detail"><span class="ph">Select an incident above to see details.</span></div>
       </div>
+      <details class="raw-log-details">
+        <summary>Raw event log &amp; SHAP explorer (advanced)</summary>
+        <div class="log-wrap">
+          <div id="live-log">
+            <div class="row head"><div>Time</div><div>Attack type</div><div>Tower</div><div>Severity</div><div>Correlation</div></div>
+          </div>
+        </div>
+        <div class="shap-wrap">
+          <div id="explain-panel"><span class="ph">Click a map marker or log row to see why it was flagged.</span></div>
+          <div id="feedback-strip">
+            <span class="fs-label">Analyst labels</span>
+            <span id="feedback-pill">—</span>
+            <span id="feedback-precision" class="fs-precision">precision —</span>
+            <a href="/feedback/export" id="feedback-export">Export CSV</a>
+          </div>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -427,8 +494,8 @@
 
   <section class="tab-panel panel-map" id="tab-map" role="tabpanel" aria-label="Severity map">
     <div class="panel-bar">
-      <span class="tag sim has-pop"><span>SIMULATED</span><button type="button" class="info" aria-label="SIMULATED: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Offline snapshot — simulated spatial layer, on real tower coordinates</span><span class="pop-label">Spatial anomaly severity map (static snapshot, from build_spatial_simulation.py)</span><span class="pop-label">What is simulated</span><span class="pop-p">Marker <strong>positions</strong> are the 136 real Telkomsel base-station coordinates. Marker <strong>color/size (severity), the blue epicenter star, and the spread over time</strong> are a documented simulation — no public dataset of real ASEAN base-station GNSS timing under spoofing exists, so this distance-decay spread stands in for "nearby infrastructure sharing correlated timing anomalies." Severity is anchored to the real detector's own <code>predict_proba()</code> range: floor 0.430 (median proba on real held-out clean rows) to ceiling 0.993 (90th-percentile proba on real held-out attack rows) — not invented numbers.</span></span></span></span>
-      <h2>Severity map</h2>
+      <span class="tag sim has-pop"><span>SIMULATED</span><button type="button" class="info" aria-label="SIMULATED: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Offline snapshot — simulated spatial layer, on real tower coordinates</span><span class="pop-label">Spatial anomaly severity map (static snapshot, from build_spatial_simulation.py)</span><span class="pop-label">What is simulated</span><span class="pop-p">Marker <strong>positions</strong> are the 136 real telecom tower locations (operator labels mixed). Marker <strong>color/size (severity), the blue epicenter star, and the spread over time</strong> are a documented simulation — no public dataset of real ASEAN base-station GNSS timing under spoofing exists, so this distance-decay spread stands in for "nearby infrastructure sharing correlated timing anomalies." Severity is anchored to the real detector's own <code>predict_proba()</code> range: floor 0.430 (median proba on real held-out clean rows) to ceiling 0.993 (90th-percentile proba on real held-out attack rows) — not invented numbers.</span></span></span></span>
+      <h2>Spatial analysis</h2>
     </div>
     <div class="controls">
       <label for="tslider">Time step</label>
@@ -449,7 +516,7 @@
   <section class="tab-panel panel-eval" id="tab-eval" role="tabpanel" aria-label="Detector evidence">
     <div class="panel-bar">
       <span class="tag real has-pop"><span>REAL</span><button type="button" class="info" aria-label="REAL: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Real, validated detector evidence — not simulated</span><span class="pop-label">Method</span><span class="pop-p">RandomForest (300 trees, class-weight balanced), trained/tested on real GNSS receiver logs, split by recording (not by row) to avoid leakage. One dynamic + one stationary held-out recording per attack type (Jamming, Meaconing, Spoofing, Spoofing+Jamming).</span></span></span></span>
-      <h2>Detector evaluation</h2>
+      <h2>About the detector</h2>
     </div>
     <div class="stat-row" id="headline-stats"></div>
     <div class="eval-left">
@@ -472,7 +539,7 @@
 </div>
 
 <footer>
-  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · Basemap: Natural Earth (public domain), bundled offline · <span class="has-pop"><span>Data sources &amp; offline behaviour</span><button type="button" class="info" aria-label="Data sources and offline behaviour: details" aria-expanded="false">ⓘ</button><span class="pop up" role="tooltip"><span class="pop-body"><span class="pop-p">Plotly 2.35.2 and the Natural Earth land/coastline layer are served locally; the dashboard loads no internet resources. Detector Evidence is recomputed by the API from the shipped model and fixed eight-recording held-out set. Severity Map is a documented simulation on real tower coordinates. Live Operations and Prioritize call the local SyncGuard API.</span></span></span></span>
+  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · Basemap: (c) OpenStreetMap contributors (ODbL), bundled offline · <span class="has-pop"><span>Data sources &amp; offline behaviour</span><button type="button" class="info" aria-label="Data sources and offline behaviour: details" aria-expanded="false">ⓘ</button><span class="pop up" role="tooltip"><span class="pop-body"><span class="pop-p">Plotly 2.35.2 and the OpenStreetMap-derived vector basemap layer are served locally; the dashboard loads no internet resources. The basemap was built once, offline, from OpenStreetMap data via the Overpass API (tools/build_basemap.py) -- not fetched at runtime. About the detector is recomputed by the API from the shipped model and fixed eight-recording held-out set. Spatial analysis is a documented simulation on real tower coordinates. NOC and Prioritize call the local SyncGuard API.</span></span></span></span>
 </footer>
 
 <script>
@@ -514,13 +581,15 @@ function chartColors(){
   const light = document.documentElement.getAttribute('data-theme') === 'light';
   return light ? {
     paper:'#FFFFFF', grid:'#D8E3E8', axis:'#5B6472', ink:'#1B2430', muted:'#5B6472',
-    mapLand:'#EEE9DC', mapCoast:'#8B9AA3',
+    mapLand:'#F2EFE7', mapCoast:'#8B9AA3', mapWater:'#C7E2EE', mapRoad:'#A3ACB2',
+    mapBuiltup:'#E4DFCF', mapLabel:'#2E3B44', mapLabelHalo:'#FFFFFF',
     markerLine:'#1B2430', baseMarker:'#A8A292', baseMarkerLine:'#FFFFFF',
     hoverBg:'#FFFFFF', hoverBorderNeutral:'#C7C2B4', fiBar:'#2A5C82', epicenter:'#2A5C82',
     lisa:{1:'#A83232', 2:'#1B2430', 3:'#2A5C82', 4:'#1B2430'}, alertLine:'#FFFFFF', flagText:'#7F6129',
   } : {
     paper:'#0E1826', grid:'#233145', axis:'#8492A6', ink:'#E7ECF3', muted:'#8492A6',
-    mapLand:'#18283A', mapCoast:'#526B82',
+    mapLand:'#18283A', mapCoast:'#526B82', mapWater:'#1F3A52', mapRoad:'#556674',
+    mapBuiltup:'#22334A', mapLabel:'#C7D2E0', mapLabelHalo:'#0E1826',
     markerLine:'#0B1119', baseMarker:'#43526A', baseMarkerLine:'#0B1119',
     hoverBg:'#141F2E', hoverBorderNeutral:'#3A4B60', fiBar:'#4F9BD8', epicenter:'#5FB0EC',
     lisa:{1:'#E85D62', 2:'#C7D2E0', 3:'#5FB0EC', 4:'#C7D2E0'}, alertLine:'#0B1119', flagText:'#E7A552',
@@ -530,23 +599,123 @@ const FONT_UI = 'DejaVu Sans, Verdana, sans-serif';
 const FONT_MONO = 'DejaVu Sans Mono, Consolas, monospace';
 let currentTimestep = 0;
 let offlineBasemap = null;
+let offlineBasemapIsFallback = false;
+
+function loadBasemapFrom(url, isFallback){
+  return fetch(url, {cache:'force-cache'})
+    .then(response => {
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    })
+    .then(data => {
+      offlineBasemap = data;
+      offlineBasemapIsFallback = isFallback;
+      renderTimestep(currentTimestep);
+      document.dispatchEvent(new Event('basemapready'));
+    });
+}
 
 // Same-origin, bundled GeoJSON: no tiles, fonts, scripts, or map services are fetched from
-// the internet. Natural Earth is public domain; see assets/OFFLINE_BASEMAP_ATTRIBUTION.md.
-const offlineBasemapReady = fetch('/assets/offline_basemap.geojson', {cache:'force-cache'})
-  .then(response => {
-    if(!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  })
-  .then(data => {
-    offlineBasemap = data;
-    renderTimestep(currentTimestep);
-    document.dispatchEvent(new Event('basemapready'));
-  })
-  .catch(error => console.error('Bundled offline basemap failed to load:', error));
+// the internet. Primary layer is OpenStreetMap-derived, built once offline by
+// tools/build_basemap.py (see assets/OFFLINE_BASEMAP_ATTRIBUTION.md); if it fails to load,
+// fall back to the smaller bundled Natural Earth layer so the map still has orientation.
+const offlineBasemapReady = loadBasemapFrom('/assets/offline_basemap.geojson', false)
+  .catch(error => {
+    console.error('Primary OSM basemap failed to load, falling back to Natural Earth:', error);
+    return loadBasemapFrom('/assets/offline_basemap_natural_earth_fallback.geojson', true)
+      .catch(fallbackError => console.error('Fallback basemap also failed to load:', fallbackError));
+  });
+
+// Place labels are drawn as Plotly layout annotations (not a scatter trace) so they get a
+// solid bgcolor halo -- readable even where a tower marker sits nearby -- see
+// basemapPlaceAnnotations() below, merged into each map's layout.annotations.
+let basemapPlaceLabels = [];
 
 function basemapTraces(c){
   if(!offlineBasemap) return [];
+  if(offlineBasemapIsFallback) return basemapTracesFallback(c);
+
+  const waterX=[], waterY=[], riverX=[], riverY=[], majorRiverX=[], majorRiverY=[],
+        roadX=[], roadY=[], builtupX=[], builtupY=[], coastX=[], coastY=[];
+  basemapPlaceLabels = [];
+  const appendRing = (ring, xs, ys) => {
+    ring.forEach(p => { xs.push(p[0]); ys.push(p[1]); });
+    xs.push(null); ys.push(null);
+  };
+  const appendLine = (line, xs, ys) => {
+    line.forEach(p => { xs.push(p[0]); ys.push(p[1]); });
+    xs.push(null); ys.push(null);
+  };
+
+  offlineBasemap.features.forEach(feature => {
+    const props = feature.properties || {};
+    const geometry = feature.geometry || {};
+    const cat = props.category;
+    if(cat === 'water' || cat === 'builtup'){
+      const xs = cat === 'water' ? waterX : builtupX, ys = cat === 'water' ? waterY : builtupY;
+      if(geometry.type === 'Polygon') geometry.coordinates.forEach(ring => appendRing(ring, xs, ys));
+      if(geometry.type === 'MultiPolygon') geometry.coordinates.forEach(poly => poly.forEach(ring => appendRing(ring, xs, ys)));
+    } else if(cat === 'coastline'){
+      if(geometry.type === 'LineString') appendLine(geometry.coordinates, coastX, coastY);
+      if(geometry.type === 'MultiLineString') geometry.coordinates.forEach(l => appendLine(l, coastX, coastY));
+    } else if(cat === 'river'){
+      const xs = props.major ? majorRiverX : riverX, ys = props.major ? majorRiverY : riverY;
+      if(geometry.type === 'LineString') appendLine(geometry.coordinates, xs, ys);
+      if(geometry.type === 'MultiLineString') geometry.coordinates.forEach(l => appendLine(l, xs, ys));
+    } else if(cat === 'road'){
+      if(geometry.type === 'LineString') appendLine(geometry.coordinates, roadX, roadY);
+      if(geometry.type === 'MultiLineString') geometry.coordinates.forEach(l => appendLine(l, roadX, roadY));
+    } else if(cat === 'place' && geometry.type === 'Point'){
+      basemapPlaceLabels.push({x: geometry.coordinates[0], y: geometry.coordinates[1], name: props.name});
+    }
+  });
+
+  const traces = [];
+  if(Array.isArray(offlineBasemap.bbox) && offlineBasemap.bbox.length === 4){
+    const [w,s,e,n] = offlineBasemap.bbox;
+    traces.push({ // bottom-most: light land fill across the whole basemap extent
+      type:'scatter', mode:'lines', x:[w,e,e,w,w], y:[s,s,n,n,s], fill:'toself',
+      fillcolor:c.mapLand, line:{width:0}, hoverinfo:'skip', showlegend:false,
+    });
+  }
+  traces.push({ // faint built-up-area fill
+    type:'scatter', mode:'lines', x:builtupX, y:builtupY, fill:'toself',
+    fillcolor:c.mapBuiltup, line:{width:0}, hoverinfo:'skip', showlegend:false,
+  });
+  traces.push({ // light-blue water bodies
+    type:'scatter', mode:'lines', x:waterX, y:waterY, fill:'toself',
+    fillcolor:c.mapWater, line:{color:c.mapWater, width:0.5}, hoverinfo:'skip', showlegend:false,
+  });
+  traces.push({ // coastline reference line (not filled sea -- see tools/build_basemap.py)
+    type:'scatter', mode:'lines', x:coastX, y:coastY,
+    line:{color:c.mapCoast, width:1}, hoverinfo:'skip', showlegend:false,
+  });
+  traces.push({ // minor named rivers/canals
+    type:'scatter', mode:'lines', x:riverX, y:riverY,
+    line:{color:c.mapWater, width:1.1}, opacity:0.85, hoverinfo:'skip', showlegend:false,
+  });
+  traces.push({ // major rivers (e.g. Kapuas), thicker so the main waterway reads clearly
+    type:'scatter', mode:'lines', x:majorRiverX, y:majorRiverY,
+    line:{color:c.mapWater, width:2.6}, opacity:0.95, hoverinfo:'skip', showlegend:false,
+  });
+  traces.push({ // thin gray major roads
+    type:'scatter', mode:'lines', x:roadX, y:roadY,
+    line:{color:c.mapRoad, width:0.8}, opacity:0.8, hoverinfo:'skip', showlegend:false,
+  });
+  return traces;
+}
+
+function basemapPlaceAnnotations(c){
+  return basemapPlaceLabels.map(p => ({
+    x: p.x, y: p.y, text: p.name, showarrow:false, yanchor:'bottom', yshift:8,
+    font:{color:c.mapLabel, size:11.5, family:FONT_UI},
+    bgcolor:c.mapLabelHalo, opacity:0.92, borderpad:1.5,
+  }));
+}
+
+function basemapTracesFallback(c){
+  // Old Natural Earth schema: properties.layer === 'land' | 'rivers' (no 'category' field).
+  basemapPlaceLabels = [{x: 109.341, y: -0.026, name: 'Pontianak'}];
   const landX = [], landY = [], riverX = [], riverY = [];
   const appendRing = ring => {
     ring.forEach(point => { landX.push(point[0]); landY.push(point[1]); });
@@ -569,11 +738,8 @@ function basemapTraces(c){
     hoverinfo:'skip', showlegend:false,
   }, {
     type:'scatter', mode:'lines', x:riverX, y:riverY,
-    line:{color:c.epicenter, width:0.8}, opacity:0.55,
+    line:{color:c.mapWater, width:0.8}, opacity:0.55,
     hoverinfo:'skip', showlegend:false,
-  }, {
-    type:'scatter', mode:'text', x:[109.341], y:[-0.026], text:['Pontianak'],
-    textfont:{color:c.muted, size:12, family:FONT_UI}, hoverinfo:'skip', showlegend:false,
   }];
 }
 
@@ -663,10 +829,9 @@ function severityLayout(){
     yaxis:{title:'Latitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
            range: viewBounds.yrange, autorange:false},
     hovermode:'closest',
+    annotations: basemapPlaceAnnotations(c),
   };
 }
-
-Plotly.newPlot('map', buildTraces(0), severityLayout(), {displayModeBar:true, displaylogo:false, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
 
 // Sparkline over meta.flagged_counts -- real data already loaded statically at page load
 // (the 4 offline simulation snapshots), not SSE-derived, so this stays outside the live
@@ -784,6 +949,12 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   const priorityListEl = $('priority-list'), prioritySummaryEl = $('priority-summary');
   const dataModeEl = $('data-mode'), flaggedTowersEl = $('flagged-towers');
   const activeAlertsEl = $('active-alerts');
+  const nocDataModeEl = $('noc-data-mode'), nocActiveAlertsEl = $('noc-active-alerts');
+  const nocFlaggedTowersEl = $('noc-flagged-towers'), nocSilentTowersEl = $('noc-silent-towers');
+  const incidentQueueEl = $('incident-queue'), incidentDetailEl = $('incident-detail');
+  let incidentsById = new Map();   // incident_id -> incident record from GET /incidents
+  let selectedIncidentId = null;
+  let incidentRefreshTimer = null;
   // event_id -> the API's current feedback record. A cache in front of the API, never
   // a substitute for it: every panel open re-reads the server and repaints.
   const feedbackByEvent = new Map();
@@ -842,12 +1013,31 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
 
   function setDataMode(mode){
     dataModeEl.textContent = mode;
+    if(nocDataModeEl) nocDataModeEl.textContent = mode;
+  }
+
+  // liveSeverity is keyed by tower_site_id, same as the rest of the dashboard (see
+  // api/spatial.py::load_towers -- 16 real towers share the placeholder site_id "tbg", so
+  // this inherits that existing collision: one "tbg" tower reporting marks all 16 as
+  // not-silent. Not introduced here; not fixed here.
+  function silentTowers(){
+    const seen = new Set(liveSeverity.keys());
+    return allTowers.filter(t => !seen.has(t.site_id));
+  }
+
+  function silentTowerCount(){
+    return silentTowers().length;
+  }
+
+  function refreshSilentTowers(){
+    if(nocSilentTowersEl) nocSilentTowersEl.textContent = silentTowerCount();
   }
 
   function renderPriority(payload){
     const rows = payload.towers || [];
     prioritySummaryEl.textContent = `${payload.n_flagged ?? rows.length} flagged tower${(payload.n_flagged ?? rows.length) === 1 ? '' : 's'}`;
     flaggedTowersEl.textContent = payload.n_flagged ?? rows.length;
+    if(nocFlaggedTowersEl) nocFlaggedTowersEl.textContent = payload.n_flagged ?? rows.length;
     if(!rows.length){
       priorityListEl.innerHTML = `<div class="priority-empty">${escapeHtml(payload.empty_state || 'No towers are currently flagged by the severity gate.')}</div>`;
       return;
@@ -879,9 +1069,14 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     }
   }
 
+  // Throttle, not debounce: during continuous replay, SSE events arrive faster than 200ms
+  // apart, so a plain debounce (clear-then-reset on every call) would perpetually push the
+  // refresh back and it would never actually fire -- "flagged towers" would stay stuck at 0
+  // for as long as the stream kept flowing. Scheduling only when nothing is already pending
+  // guarantees a refresh at least every ~200ms instead.
   function schedulePriorityRefresh(){
-    if(priorityRefreshTimer) clearTimeout(priorityRefreshTimer);
-    priorityRefreshTimer = setTimeout(refreshPriority, 200);
+    if(priorityRefreshTimer) return;
+    priorityRefreshTimer = setTimeout(() => { priorityRefreshTimer = null; refreshPriority(); }, 200);
   }
 
   async function establishSession(){
@@ -945,6 +1140,8 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     } : null;
     const alerting = active.filter(t => t.alert_state === 'alerting');
     activeAlertsEl.textContent = alerting.length;
+    if(nocActiveAlertsEl) nocActiveAlertsEl.textContent = alerting.length;
+    refreshSilentTowers();
     const alertTrace = alerting.length ? {
       type:'scattergl', mode:'markers', x: alerting.map(t=>t.lon), y: alerting.map(t=>t.lat),
       marker:{symbol:'diamond', size:11, color:'#A83232', line:{color:c.alertLine, width:1.6}},
@@ -952,7 +1149,17 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#A83232', font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
-    const traces = [...basemapTraces(c), base, activeTrace, lisaTrace, alertTrace].filter(Boolean);
+    const selectedIncident = selectedIncidentId ? incidentsById.get(selectedIncidentId) : null;
+    const selectedSiteIds = selectedIncident ? new Set(selectedIncident.towers.map(t=>t.site_id)) : null;
+    const selectedTowers = selectedSiteIds ? active.filter(t => selectedSiteIds.has(t.site_id)) : [];
+    const selectedTrace = selectedTowers.length ? {
+      type:'scattergl', mode:'markers', x: selectedTowers.map(t=>t.lon), y: selectedTowers.map(t=>t.lat),
+      marker:{symbol:'circle-open', size: 26, color:c.epicenter, line:{color:c.epicenter, width:2.5}},
+      text: selectedTowers.map(t => `<b>${t.site_id}</b> — part of selected incident ${escapeHtml(selectedIncidentId)}`),
+      hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:c.epicenter, font:{color:c.ink, size:12, family:FONT_UI}},
+      showlegend:false,
+    } : null;
+    const traces = [...basemapTraces(c), base, activeTrace, lisaTrace, alertTrace, selectedTrace].filter(Boolean);
     const liveLayout = {
       paper_bgcolor:c.paper, plot_bgcolor:c.paper, font:{color:c.ink, family:FONT_UI},
       margin:{l:50,r:20,t:10,b:40},
@@ -961,8 +1168,262 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       yaxis:{title:'Latitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
              range: viewBounds.yrange, autorange:false},
       hovermode:'closest',
+      annotations: basemapPlaceAnnotations(c),
     };
     Plotly.react('live-map', traces, liveLayout, {displayModeBar:false, responsive:true});
+  }
+
+  // ---------- Incident queue (NOC item 2) ----------
+  const incidentSignals = new Map(); // incident_id -> up to 3 top_features, once fetched
+
+  function incidentRowHtml(inc){
+    const towerNames = inc.towers.map(t => t.site_id || t.site_name).join(', ') || '—';
+    const simTag = inc.tower_attribution_simulated
+      ? ' <span class="tag sim incident-tag-sm">SIMULATED</span>' : '';
+    const start = new Date(inc.start_time).toLocaleTimeString();
+    const dur = inc.duration_seconds < 1 ? '<1s' : `${Math.round(inc.duration_seconds)}s`;
+    return `<div class="incident-row${inc.incident_id===selectedIncidentId?' selected':''}" data-id="${escapeHtml(inc.incident_id)}">
+      <div class="ir-top"><span>${escapeHtml(inc.incident_id)}</span><span class="incident-status ${inc.status.toLowerCase()}">${inc.status}</span></div>
+      <div class="ir-meta">
+        <span title="Towers involved">${escapeHtml(towerNames)}${simTag}</span>
+        <span>start ${start} (recording time)</span>
+        <span>dur ${dur}</span>
+        <span>severity ${inc.severity.toFixed(3)}</span>
+        <span>${inc.event_count} reading${inc.event_count===1?'':'s'} · ${inc.labeled_event_count} labeled</span>
+      </div>
+    </div>`;
+  }
+
+  function renderIncidentQueue(incidents){
+    incidentsById = new Map(incidents.map(i => [i.incident_id, i]));
+    if(selectedIncidentId && !incidentsById.has(selectedIncidentId)) selectedIncidentId = null;
+    if(!incidents.length){
+      incidentQueueEl.innerHTML = `<div class="incident-empty">No incidents this session -- towers are quiet, or no alerting events have been scored yet.</div>`;
+      renderIncidentDetailEmpty();
+      return;
+    }
+    incidentQueueEl.innerHTML = incidents.map(incidentRowHtml).join('');
+    incidentQueueEl.querySelectorAll('.incident-row').forEach(row => {
+      row.addEventListener('click', () => selectIncident(row.dataset.id));
+    });
+    if(selectedIncidentId) renderIncidentDetail(incidentsById.get(selectedIncidentId));
+  }
+
+  async function fetchIncidents(){
+    try{
+      const data = await api('/incidents').then(r => {
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+      renderIncidentQueue(data.incidents || []);
+      renderLiveMap(); // refresh the selected-incident highlight ring
+    }catch(err){
+      incidentQueueEl.innerHTML = `<div class="incident-error">Could not load incidents: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  // Same throttle-not-debounce reasoning as schedulePriorityRefresh() above.
+  function scheduleIncidentRefresh(){
+    if(incidentRefreshTimer) return;
+    incidentRefreshTimer = setTimeout(() => { incidentRefreshTimer = null; fetchIncidents(); }, 300);
+  }
+
+  function renderIncidentDetailEmpty(){
+    incidentDetailEl.innerHTML = `<span class="ph">Select an incident above to see details.</span>`;
+  }
+
+  function selectIncident(id){
+    selectedIncidentId = id;
+    incidentQueueEl.querySelectorAll('.incident-row').forEach(row =>
+      row.classList.toggle('selected', row.dataset.id === id));
+    renderLiveMap();
+    const inc = incidentsById.get(id);
+    if(inc) renderIncidentDetail(inc);
+  }
+
+  const NOC_CHECKLIST_HTML = `<div class="incident-checklist">
+    <b>Suggested next steps</b> <span class="tag sim incident-tag-sm">not validated</span>
+    <ul>
+      <li>Compare with neighboring sites for correlated anomalies.</li>
+      <li>Check antenna/cable and receiver status at the affected tower(s).</li>
+      <li>Check the holdover/backup timing source.</li>
+      <li>Escalate if the pattern persists past the debounce window.</li>
+    </ul>
+    <div class="note-sm">Suggested checklist - not validated with an operator.</div>
+  </div>`;
+
+  async function renderIncidentDetail(inc){
+    let topFeatures = incidentSignals.get(inc.incident_id);
+    let explainError = null;
+    if(!topFeatures){
+      const cachedEv = eventsById.get(inc.top_event_id);
+      if(cachedEv && cachedEv.top_features){
+        topFeatures = cachedEv.top_features;
+      } else {
+        try{
+          const d = await api(`/events/${inc.top_event_id}/explain`).then(r => {
+            if(!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          });
+          topFeatures = d.top_features;
+        }catch(err){ explainError = err.message; }
+      }
+      if(topFeatures) incidentSignals.set(inc.incident_id, topFeatures);
+    }
+    if(selectedIncidentId !== inc.incident_id) return; // a newer selection raced this one
+
+    const simNote = inc.tower_attribution_simulated
+      ? `<div class="note-sm">Towers involved: attribution SIMULATED (replay). Grouped by time and straight-line distance only; real deployments would group by shared timing source or region.</div>`
+      : `<div class="note-sm">Grouped by time and straight-line distance only; real deployments would group by shared timing source or region.</div>`;
+
+    const popLine = inc.max_pop_2km === null || inc.max_pop_2km === undefined
+      ? 'population unavailable'
+      : `${Math.round(inc.max_pop_2km).toLocaleString()} est. within 2 km (highest single tower, not summed)`;
+
+    const signalsHtml = topFeatures
+      ? `<div class="incident-signals">${shapBarsHtml(topFeatures.slice(0,3))}</div>`
+      : `<span class="ph">${escapeHtml(explainError ? `Could not load signals: ${explainError}` : 'No stored signals for this event.')}</span>`;
+
+    incidentDetailEl.innerHTML = `
+      <div><b>${escapeHtml(inc.incident_id)}</b> · severity ${inc.severity.toFixed(3)} · <span class="incident-status ${inc.status.toLowerCase()}">${inc.status}</span></div>
+      ${simNote}
+      <h4>Signals that most influenced this alert (top 3)</h4>
+      ${signalsHtml}
+      <div class="incident-impact">
+        <b>Impact and data health</b>
+        <div>${inc.towers.length} tower${inc.towers.length===1?'':'s'} involved · ${escapeHtml(popLine)}</div>
+        <div class="note-sm">Estimated people within 2 km (exposure proxy, ~2020) -- never summed across towers.</div>
+      </div>
+      ${NOC_CHECKLIST_HTML}
+      <div class="note-sm">${inc.labeled_event_count} of ${inc.event_count} events in this incident are labeled. Confirm/Dismiss below labels only the peak-severity event (#${inc.top_event_id}).</div>
+      <div id="incfb-wrap">
+        <div class="incfb-row">
+          <button type="button" class="fb-btn confirm" id="incfb-confirm" disabled>Confirm — real event</button>
+          <button type="button" class="fb-btn dismiss" id="incfb-dismiss" disabled>Dismiss — false alarm</button>
+          <span class="incfb-state" id="incfb-state">loading…</span>
+        </div>
+      </div>
+      <div class="incident-actions">
+        <button type="button" class="btn-copy" id="incident-copy-btn">Copy incident summary</button>
+      </div>
+    `;
+    wireIncidentFeedback(inc.top_event_id, inc.incident_id);
+    const copyBtn = document.getElementById('incident-copy-btn');
+    if(copyBtn) copyBtn.addEventListener('click', () => copyIncidentSummary(inc));
+  }
+
+  // Deliberately separate from wireFeedback()/paintFeedback(): those target fixed ids
+  // (#fb-confirm etc.) shared with the raw-log explain panel, which stays in the DOM (inside
+  // a <details>) at the same time as this panel -- reusing those ids here would collide.
+  function feedbackStateText(record){
+    if(!record.label) return 'not yet labeled';
+    const who = record.analyst ? ` by ${record.analyst}` : '';
+    const when = record.updated_at ? ` · ${new Date(record.updated_at).toLocaleString()}` : '';
+    return `${record.label}${who}${when}`;
+  }
+
+  async function wireIncidentFeedback(eventId, incidentId){
+    const confirmBtn = document.getElementById('incfb-confirm');
+    const dismissBtn = document.getElementById('incfb-dismiss');
+    const stateEl = document.getElementById('incfb-state');
+    if(!confirmBtn || !dismissBtn || !stateEl) return;
+    let submitted = false; // guards the initial GET below from clobbering a click that raced it
+
+    const send = async (label) => {
+      submitted = true;
+      confirmBtn.disabled = dismissBtn.disabled = true;
+      stateEl.classList.remove('err');
+      stateEl.textContent = 'saving…';
+      try{
+        const res = await api(`/events/${eventId}/feedback`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({label, analyst: analystName()}),
+        });
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        const record = await res.json();
+        feedbackByEvent.set(eventId, record);
+        confirmBtn.disabled = dismissBtn.disabled = false;
+        confirmBtn.classList.toggle('active', record.label === 'confirmed');
+        dismissBtn.classList.toggle('active', record.label === 'dismissed');
+        stateEl.textContent = feedbackStateText(record);
+        refreshFeedbackSummary();
+        scheduleIncidentRefresh(); // status / labeled_event_count changed
+      }catch(err){
+        confirmBtn.disabled = dismissBtn.disabled = false;
+        stateEl.classList.add('err');
+        stateEl.textContent = `could not save: ${err.message}`;
+      }
+    };
+    confirmBtn.addEventListener('click', () => send('confirmed'));
+    dismissBtn.addEventListener('click', () => send('dismissed'));
+    confirmBtn.disabled = dismissBtn.disabled = false;
+
+    const cached = feedbackByEvent.get(eventId);
+    if(cached){
+      confirmBtn.classList.toggle('active', cached.label === 'confirmed');
+      dismissBtn.classList.toggle('active', cached.label === 'dismissed');
+      stateEl.textContent = feedbackStateText(cached);
+    }
+    try{
+      const record = await api(`/events/${eventId}/feedback`).then(r => {
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+      feedbackByEvent.set(eventId, record);
+      if(selectedIncidentId !== incidentId || submitted) return; // raced by a newer selection or a click
+      confirmBtn.classList.toggle('active', record.label === 'confirmed');
+      dismissBtn.classList.toggle('active', record.label === 'dismissed');
+      stateEl.textContent = feedbackStateText(record);
+    }catch(err){
+      if(!cached && !submitted){ stateEl.classList.add('err'); stateEl.textContent = `could not load: ${err.message}`; }
+    }
+  }
+
+  function incidentSummaryText(inc){
+    const towers = inc.towers.map(t => t.site_id || t.site_name).join(', ') || 'none';
+    const simTag = inc.tower_attribution_simulated ? ' (tower attribution SIMULATED)' : '';
+    const start = new Date(inc.start_time).toLocaleString();
+    const dur = inc.duration_seconds < 1 ? '<1s' : `${Math.round(inc.duration_seconds)}s`;
+    const features = incidentSignals.get(inc.incident_id) || [];
+    const signals = features.slice(0,3)
+      .map(f => `  - ${featurePhrase(f.feature)} (${f.direction})`).join('\n');
+    const popLine = inc.max_pop_2km === null || inc.max_pop_2km === undefined
+      ? 'population unavailable'
+      : `~${Math.round(inc.max_pop_2km).toLocaleString()} est. within 2km of the highest-exposure tower (not summed)`;
+    return [
+      `SyncGuard incident ${inc.incident_id}`,
+      `What: ${inc.attack_type || 'GNSS anomaly'} alert, severity ${inc.severity.toFixed(3)} (SIMULATED severity->probability mapping; REAL detector probability)`,
+      `Where: ${towers}${simTag}`,
+      `When: start ${start} (recording time), duration ${dur}, ${inc.event_count} reading${inc.event_count===1?'':'s'}`,
+      signals ? `Signals that most influenced this alert:\n${signals}` : '',
+      `Impact: ${popLine}`,
+      `Status: ${inc.status} (${inc.labeled_event_count} of ${inc.event_count} events labeled)`,
+      `Note: grouped by time and distance only, a demo heuristic -- not confirmed spatial spread.`,
+    ].filter(Boolean).join('\n');
+  }
+
+  function copyIncidentSummary(inc){
+    const text = incidentSummaryText(inc);
+    const btn = document.getElementById('incident-copy-btn');
+    const done = () => {
+      if(!btn) return;
+      btn.classList.add('copied'); btn.textContent = 'Copied';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy incident summary'; }, 1500);
+    };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    } else {
+      fallbackCopy(text, done);
+    }
+  }
+
+  function fallbackCopy(text, done){
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try{ document.execCommand('copy'); done(); }catch(e){ /* clipboard unavailable */ }
+    document.body.removeChild(ta);
   }
 
   function logEvent(ev){
@@ -1234,7 +1695,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         liveSeverity.set(e.tower_site_id, {
           site_id: e.tower_site_id, name: e.tower_site_name, lat: e.tower_lat, lon: e.tower_lon,
           severity: e.severity, correlation: e.correlation_score ?? 0, event_id: e.id,
-          alert_state: e.alert_state,
+          alert_state: e.alert_state, created_at: e.created_at,
         });
         eventsById.set(e.id, {
           event_id: e.id, attack_type: e.attack_type, severity: e.severity,
@@ -1244,7 +1705,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         });
       });
       renderLiveMap();
+      refreshSilentTowers();
       await refreshPriority();
+      await fetchIncidents();
       openStream();
 
       if(moranTimer) clearInterval(moranTimer);
@@ -1271,10 +1734,11 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       liveSeverity.set(ev.tower.site_id, {
         site_id: ev.tower.site_id, name: ev.tower.site_name, lat: ev.tower.lat, lon: ev.tower.lon,
         severity: ev.severity, correlation: ev.correlation_score ?? 0, event_id: ev.event_id,
-        alert_state: ev.alert_state,
+        alert_state: ev.alert_state, created_at: ev.created_at,
       });
       renderLiveMap();
       schedulePriorityRefresh();
+      scheduleIncidentRefresh();
       logEvent(ev);
       sessionCount += 1;
       countEl.textContent = sessionCount;
@@ -1300,7 +1764,12 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
 
   btnConnect.addEventListener('click', connect);
   btnStart.addEventListener('click', async () => {
-    const params = new URLSearchParams({speed: speedSelect.value});
+    // NOC's incident queue groups by time AND distance (api/incidents.py), so replay uses the
+    // SIMULATED epicenter-weighted attribution (api/spatial.py::EpicenterWeightedAttributor)
+    // instead of round-robin -- round-robin scatters events across all 136 towers regardless
+    // of proximity, which under distance-based grouping fragments into one incident per
+    // reading instead of a small number of localized ones. Still SIMULATED either way.
+    const params = new URLSearchParams({speed: speedSelect.value, attribution: 'epicenter'});
     if(runSelect.value) params.set('run_id', runSelect.value);
     const res = await api(`/replay/start?${params}`, {method:'POST'});
     if(res.ok){ btnStart.disabled = true; btnStop.disabled = false; setDataMode('REPLAY - recorded receiver logs, tower attribution SIMULATED'); }

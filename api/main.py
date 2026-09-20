@@ -23,11 +23,12 @@ from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
 
 from api.schemas import (TelemetryInput, ScoreResponse, HealthResponse, AutocorrelationResponse,
                          ExplainResponse, IngestBatch, IngestResponse, FeedbackRequest,
-                         FeedbackRecord, FeedbackSummary)
+                         FeedbackRecord, FeedbackSummary, IncidentsResponse)
 from api.model_service import ModelService, ModelNotFoundError
 from api.db import EventStore
-from api.spatial import load_towers, TowerAttributor, LiveCorrelationEngine
+from api.spatial import load_towers, TowerAttributor, EpicenterWeightedAttributor, LiveCorrelationEngine
 from api.exposure import attach_exposure, rank_priority, records_with_nulls
+from api.incidents import build_incidents, INCIDENT_WINDOW_SECONDS, INCIDENT_DISTANCE_KM
 from api.spatial_stats import compute_autocorrelation
 from api.replay import ReplayManager, EventBus, list_run_ids
 from api.ingest import IngestService, UnknownTowerError
@@ -54,6 +55,7 @@ DASHBOARD_PATH = REPO_ROOT / "syncguard_interactive_summary.html"
 ASSET_DIR = REPO_ROOT / "assets"
 PLOTLY_PATH = ASSET_DIR / "plotly-2.35.2.min.js"
 BASEMAP_PATH = ASSET_DIR / "offline_basemap.geojson"
+BASEMAP_FALLBACK_PATH = ASSET_DIR / "offline_basemap_natural_earth_fallback.geojson"
 EVALUATION_DATASET_PATH = REPO_ROOT / "processed" / "syncguard_features.parquet"
 
 log = configure_logging()
@@ -92,6 +94,14 @@ async def lifespan(app: FastAPI):
     towers = attach_exposure(load_towers())
     app.state.towers = towers
     app.state.tower_attributor = TowerAttributor(towers)
+    # Named replay attribution modes -- see api/spatial.py::EpicenterWeightedAttributor and
+    # api/replay.py::ReplayManager. round_robin is the API default; the dashboard's NOC tab
+    # requests epicenter so its incident queue groups into a small number of localized
+    # incidents instead of one spanning all 136 towers.
+    app.state.replay_attributors = {
+        "round_robin": app.state.tower_attributor,
+        "epicenter": EpicenterWeightedAttributor(towers),
+    }
     app.state.correlation_engine = LiveCorrelationEngine(towers, app.state.event_store)
     app.state.event_bus = EventBus()
     app.state.ingest_service = IngestService(
@@ -100,7 +110,7 @@ async def lifespan(app: FastAPI):
         baseline=app.state.baseline,
     ) if app.state.model_service else None
     app.state.replay_manager = ReplayManager(
-        app.state.model_service, app.state.event_store, app.state.tower_attributor,
+        app.state.model_service, app.state.event_store, app.state.replay_attributors,
         app.state.correlation_engine, app.state.event_bus,
     ) if app.state.model_service else None
 
@@ -535,6 +545,33 @@ async def events_map():
     return list(app.state.event_store.latest_severity_per_tower().values())
 
 
+@app.get("/incidents", response_model=IncidentsResponse)
+async def incidents(limit: int = Query(default=2000, le=2000)):
+    """The NOC tab's incident queue: flagged events grouped into incidents. See
+    api/incidents.py for the grouping rule -- time AND distance chaining, not a real
+    spatial-clustering algorithm."""
+    events_rows = app.state.event_store.recent_events(limit=limit)
+    event_ids = [e["id"] for e in events_rows]
+    feedback_by_event = app.state.event_store.feedback_for_events(event_ids)
+    pop_2km_by_tower = app.state.towers.set_index("tower_key")["pop_2km"].dropna().to_dict()
+    grouped = build_incidents(events_rows, feedback_by_event, pop_2km_by_tower)
+    return IncidentsResponse(
+        incidents=grouped,
+        window_seconds=INCIDENT_WINDOW_SECONDS,
+        distance_km=INCIDENT_DISTANCE_KM,
+        method_note=(
+            "Consecutive alerting events (hysteresis-confirmed, or threshold-flagged for "
+            "stateless /score calls) are chained into one incident when no more than "
+            f"{INCIDENT_WINDOW_SECONDS}s apart by created_at (server insert time, 'recording "
+            f"time' during replay) AND no more than {INCIDENT_DISTANCE_KM:g}km apart by real "
+            "tower distance, never across two different replay runs. A demo heuristic, not a "
+            "real spatial-clustering algorithm. Status comes from existing analyst "
+            "confirm/dismiss labels on the incident's peak-severity event; nothing here is "
+            "learned. See api/incidents.py."
+        ),
+    )
+
+
 @app.get("/priority")
 async def priority():
     """Which flagged towers to look at first: gate, then rank by estimated nearby population.
@@ -724,13 +761,17 @@ async def replay_runs():
 
 
 @app.post("/replay/start")
-async def replay_start(run_id: str | None = None, speed: float = 10.0):
+async def replay_start(run_id: str | None = None, speed: float = 10.0, attribution: str | None = None):
+    """`attribution`: 'round_robin' (default) | 'epicenter' -- which SIMULATED tower
+    attribution mechanism replay uses for this run. See api/spatial.py."""
     if app.state.replay_manager is None:
         raise HTTPException(503, "No trained model loaded -- run `make train` first, then restart the service.")
     try:
-        return app.state.replay_manager.start(run_id, speed)
-    except (RuntimeError, ValueError) as e:
+        return app.state.replay_manager.start(run_id, speed, attribution)
+    except RuntimeError as e:
         raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 @app.post("/replay/stop")
@@ -798,7 +839,18 @@ async def dashboard_plotly():
 
 @app.get("/assets/offline_basemap.geojson", include_in_schema=False)
 async def dashboard_basemap():
-    """Small Natural Earth land/coastline layer for the local tower-map bounding box."""
+    """OSM vector basemap (coastline, water, named rivers, major roads, built-up areas, place
+    labels) for the local tower-map bounding box -- built once, offline, by
+    tools/build_basemap.py. See assets/OFFLINE_BASEMAP_ATTRIBUTION.md."""
     if not BASEMAP_PATH.exists():
         raise HTTPException(404, "offline basemap asset not found")
     return FileResponse(BASEMAP_PATH, media_type="application/geo+json")
+
+
+@app.get("/assets/offline_basemap_natural_earth_fallback.geojson", include_in_schema=False)
+async def dashboard_basemap_fallback():
+    """Fallback only: the original small Natural Earth land/coastline/rivers layer, used by
+    the dashboard only if the OSM basemap above fails to load."""
+    if not BASEMAP_FALLBACK_PATH.exists():
+        raise HTTPException(404, "fallback basemap asset not found")
+    return FileResponse(BASEMAP_FALLBACK_PATH, media_type="application/geo+json")

@@ -254,3 +254,34 @@ class FeedbackSummary(BaseModel):
     hysteresis_alert_precision: Optional[float] = Field(default=None, description="confirmed / labeled, over labeled events in hysteresis state 'alerting'. null when the denominator is 0.")
 
     caveat: str = Field(description="Plain-language statement of what these precision numbers are not")
+
+
+class IncidentTower(BaseModel):
+    site_id: Optional[str] = None
+    site_name: Optional[str] = None
+
+
+class IncidentRecord(BaseModel):
+    incident_id: str = Field(description="INC-<first event id in the group>")
+    event_ids: list[int]
+    top_event_id: int = Field(description="Id of the incident's most-severe (peak-severity) event -- use this for /events/{id}/explain and for incident-level Confirm/Dismiss")
+    towers: list[IncidentTower]
+    tower_attribution_simulated: bool = Field(description="True if any member event came from replay (SIMULATED tower attribution)")
+    max_pop_2km: Optional[float] = Field(default=None, description="Highest single tower's ESTIMATED people within 2km (exposure proxy) among this incident's towers -- NEVER a sum across towers")
+    start_time: str
+    end_time: str
+    clock: str = Field(description="Which clock start_time/end_time/duration_seconds use, and its caveat")
+    duration_seconds: float
+    severity: float = Field(description="Max severity across the incident's events")
+    attack_type: Optional[str] = Field(default=None, description="Ground truth, only populated by replay -- not something a real detector would know")
+    status: str = Field(description="'New' | 'Confirmed' | 'Dismissed', derived from analyst feedback on any member event")
+    event_count: int
+    labeled_event_count: int = Field(description="Of event_count events, how many already carry an analyst label -- an incident-level Confirm/Dismiss only labels the peak-severity event, not every member")
+    grouping_note: str
+
+
+class IncidentsResponse(BaseModel):
+    incidents: list[IncidentRecord]
+    window_seconds: int = Field(description="Time-chaining window used to group events into incidents (INCIDENT_WINDOW_SECONDS; defaults to, and independently overridable from, the live correlation engine's window)")
+    distance_km: float = Field(description="Distance-chaining radius used to group events into incidents (INCIDENT_DISTANCE_KM)")
+    method_note: str

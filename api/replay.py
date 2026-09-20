@@ -93,17 +93,27 @@ class EventBus:
                 pass  # slow consumer -- drop rather than block replay
 
 
+DEFAULT_ATTRIBUTION = "round_robin"
+
+
 class ReplayManager:
-    def __init__(self, model_service, event_store, tower_attributor, correlation_engine, bus: EventBus):
+    def __init__(self, model_service, event_store, attributors: dict, correlation_engine, bus: EventBus):
+        """`attributors`: {name -> attributor instance}, e.g. {"round_robin": TowerAttributor(...),
+        "epicenter": EpicenterWeightedAttributor(...)}. Must contain DEFAULT_ATTRIBUTION.
+        Selected per replay by POST /replay/start's `attribution` query param -- round_robin
+        stays the API default (what tests and the spatial-statistics results exercise); the
+        dashboard's NOC tab requests "epicenter" so its incident queue has something spatially
+        localized to group -- see api/spatial.py::EpicenterWeightedAttributor."""
         self._model = model_service
         self._store = event_store
-        self._attributor = tower_attributor
+        self._attributors = attributors
         self._correlation = correlation_engine
         self._bus = bus
         self._task: asyncio.Task | None = None
         self._status = "idle"
         self._run_id: str | None = None
         self._speed = 1.0
+        self._attribution = DEFAULT_ATTRIBUTION
         self._rows_replayed = 0
         self._total_rows = 0
         self._error: str | None = None
@@ -118,6 +128,7 @@ class ReplayManager:
             "status": self._status,
             "run_id": self._run_id,
             "speed": self._speed,
+            "attribution": self._attribution,
             "rows_replayed": self._rows_replayed,
             "total_rows": self._total_rows,
             "error": self._error,
@@ -125,10 +136,16 @@ class ReplayManager:
             "alert_state": self._hysteresis.state,
         }
 
-    def start(self, run_id: str | None, speed: float):
+    def start(self, run_id: str | None, speed: float, attribution: str | None = None):
         if self._task and not self._task.done():
             raise RuntimeError("Replay already running -- call /replay/stop first.")
         resolved_run_id = _resolve_run_id(run_id)
+        attribution = attribution or DEFAULT_ATTRIBUTION
+        if attribution not in self._attributors:
+            raise ValueError(f"Unknown attribution mode: {attribution!r} "
+                             f"(known: {sorted(self._attributors)})")
+        self._attribution = attribution
+        self._attributor = self._attributors[attribution]
         self._run_id, self._speed = resolved_run_id, max(speed, 0.1)
         self._rows_replayed = 0
         self._error = None

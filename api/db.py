@@ -289,6 +289,18 @@ class EventStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def feedback_for_events(self, event_ids: list[int]) -> dict[int, dict]:
+        """Bulk lookup for grouping events into incidents (api/incidents.py) -- one query
+        instead of one get_feedback() call per event."""
+        if not event_ids:
+            return {}
+        placeholders = ",".join("?" * len(event_ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM event_feedback WHERE event_id IN ({placeholders})", event_ids
+            ).fetchall()
+        return {r["event_id"]: dict(r) for r in rows}
+
     def upsert_feedback(self, event_id: int, label: str, note: str | None = None,
                         analyst: str | None = None) -> dict:
         """Set (or replace) the current label for an event, and append to the audit log.
