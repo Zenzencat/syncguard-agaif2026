@@ -259,6 +259,8 @@
   .btn.stop{background:var(--panel); border-color:var(--red); color:var(--red);}
   .btn:disabled{opacity:.45; cursor:not-allowed;}
   .ctl-bar > *{max-width:100%; min-width:0;}
+  /* The color base image is drawn for a light UI; dim it in the dark theme so it does not glare. */
+  :root:not([data-theme="light"]) #live-map image, :root:not([data-theme="light"]) #map image{filter:brightness(.6) saturate(.75);}
   select.ctl{max-width:100%; min-width:0; background:var(--inset); border:1px solid var(--rule); color:var(--ink); border-radius:3px; padding:5px 9px; font-size:12px; font-family:var(--font-ui);}
 
   /* ---- Charts ---- */
@@ -444,7 +446,7 @@
         <span><i class="ring sel"></i>Selected incident</span>
       </div>
       <div class="chart-fill"><div id="live-map"></div></div>
-      <div class="map-attribution">Basemap: OpenStreetMap vector layer, bundled offline · (c) OpenStreetMap contributors (ODbL)</div>
+      <div class="map-attribution">Basemap: styled OpenStreetMap render, bundled offline · (c) OpenStreetMap contributors (ODbL)</div>
     </div>
 
     <div class="side-col">
@@ -601,6 +603,10 @@ const FONT_MONO = 'DejaVu Sans Mono, Consolas, monospace';
 let currentTimestep = 0;
 let offlineBasemap = null;
 let offlineBasemapIsFallback = false;
+// Styled color base image embedded in the bundled basemap asset (built once offline by
+// tools/build_basemap_raster.py). null until it has decoded, or forever if it fails to -- in
+// which case the maps fall back to the vector layer, exactly as before.
+let basemapRaster = null;   // {url: blob: URL, bbox: [west, south, east, north]}
 
 function loadBasemapFrom(url, isFallback){
   return fetch(url, {cache:'force-cache'})
@@ -609,11 +615,35 @@ function loadBasemapFrom(url, isFallback){
       return response.json();
     })
     .then(data => {
-      offlineBasemap = data;
-      offlineBasemapIsFallback = isFallback;
-      renderTimestep(currentTimestep);
-      document.dispatchEvent(new Event('basemapready'));
+      const decoding = (!isFallback && data.raster) ? decodeBasemapRaster(data.raster) : Promise.resolve(null);
+      return decoding.then(raster => {
+        basemapRaster = raster;
+        offlineBasemap = data;
+        offlineBasemapIsFallback = isFallback;
+        renderTimestep(currentTimestep);
+        document.dispatchEvent(new Event('basemapready'));
+      });
     });
+}
+
+// Decode the embedded base64 image into a same-origin blob: URL and confirm the browser can
+// actually draw it before anything relies on it. Resolves null (never rejects) on any failure so
+// the vector basemap keeps working.
+function decodeBasemapRaster(raster){
+  return new Promise(resolve => {
+    try{
+      const bin = atob(raster.data), bytes = new Uint8Array(bin.length);
+      for(let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], {type: 'image/' + raster.format}));
+      const img = new Image();
+      img.onload = () => resolve({url, bbox: raster.bbox});
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    }catch(error){
+      console.error('Color basemap image could not be decoded; using the vector layer:', error);
+      resolve(null);
+    }
+  });
 }
 
 // Same-origin, bundled GeoJSON: no tiles, fonts, scripts, or map services are fetched from
@@ -667,9 +697,13 @@ function basemapTraces(c){
       if(geometry.type === 'LineString') appendLine(geometry.coordinates, roadX, roadY);
       if(geometry.type === 'MultiLineString') geometry.coordinates.forEach(l => appendLine(l, roadX, roadY));
     } else if(cat === 'place' && geometry.type === 'Point'){
-      basemapPlaceLabels.push({x: geometry.coordinates[0], y: geometry.coordinates[1], name: props.name});
+      basemapPlaceLabels.push({x: geometry.coordinates[0], y: geometry.coordinates[1], name: props.name, rank: props.rank || 1});
     }
   });
+
+  // The color image (layout.images, see basemapLayoutImages) is the primary layer; the vector
+  // traces below are its fallback and are not drawn on top of it.
+  if(basemapRaster) return [];
 
   const traces = [];
   if(Array.isArray(offlineBasemap.bbox) && offlineBasemap.bbox.length === 4){
@@ -706,11 +740,27 @@ function basemapTraces(c){
   return traces;
 }
 
+// The color base image as a Plotly layout image, stretched over its own lon/lat bounding box
+// (equirectangular, so pixel x/y are linear in longitude/latitude -- the same coordinates the
+// tower markers use) and drawn beneath every trace. [] when there is no image.
+function basemapLayoutImages(){
+  if(!basemapRaster) return [];
+  const [west, south, east, north] = basemapRaster.bbox;
+  return [{
+    source: basemapRaster.url, xref:'x', yref:'y', x: west, y: north,
+    sizex: east - west, sizey: north - south, xanchor:'left', yanchor:'top',
+    sizing:'stretch', layer:'below', opacity:1,
+  }];
+}
+
 function basemapPlaceAnnotations(c){
+  // rank 1 = city/town (bold), rank 2 = the curated village/suburb subset (smaller). All are
+  // vector text, so they stay crisp when the map zooms to an incident.
   return basemapPlaceLabels.map(p => ({
-    x: p.x, y: p.y, text: p.name, showarrow:false, yanchor:'bottom', yshift:8,
-    font:{color:c.mapLabel, size:11.5, family:FONT_UI},
-    bgcolor:c.mapLabelHalo, opacity:0.92, borderpad:1.5,
+    x: p.x, y: p.y, text: p.rank === 2 ? p.name : `<b>${p.name}</b>`,
+    showarrow:false, yanchor:'bottom', yshift: p.rank === 2 ? 5 : 8,
+    font:{color:c.mapLabel, size: p.rank === 2 ? 10 : 11.5, family:FONT_UI},
+    bgcolor:c.mapLabelHalo, opacity: p.rank === 2 ? 0.78 : 0.92, borderpad:1.5,
   }));
 }
 
@@ -825,12 +875,16 @@ function severityLayout(){
     paper_bgcolor:c.paper, plot_bgcolor:c.paper,
     font:{color:c.ink, family:FONT_UI},
     margin:{l:50,r:20,t:10,b:40},
+    // Grid and zero lines would cut across the color base image, so they are off while it is shown.
     xaxis:{title:'Longitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
+           showgrid: !basemapRaster, zeroline: !basemapRaster,
            range: viewBounds.xrange, autorange:false},
     yaxis:{title:'Latitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
+           showgrid: !basemapRaster, zeroline: !basemapRaster,
            range: viewBounds.yrange, autorange:false},
     hovermode:'closest',
     annotations: basemapPlaceAnnotations(c),
+    images: basemapLayoutImages(),
   };
 }
 
@@ -1214,7 +1268,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     // every SSE message; an identical redraw is pure churn and, on a WebGL scatter, competes
     // with the user's mouse-down/up so a click can land on a marker that was just replaced.
     const mapHash = hashString(JSON.stringify([
-      c, traces.length, basemapPlaceLabels.length, allTowers.length, zoomRange,
+      c, traces.length, basemapPlaceLabels.length, basemapLayoutImages().length, allTowers.length, zoomRange,
       activeTrace.x, activeTrace.y, activeTrace.customdata, activeTrace.marker.color,
       activeTrace.marker.size, activeTrace.text,
       lisaTrace && [lisaTrace.x, lisaTrace.y, lisaTrace.marker.color, lisaTrace.marker.size],
@@ -1226,11 +1280,14 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       paper_bgcolor:c.paper, plot_bgcolor:c.paper, font:{color:c.ink, family:FONT_UI},
       margin:{l:50,r:20,t:10,b:40},
       xaxis:{title:'Longitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
+             showgrid: !basemapRaster, zeroline: !basemapRaster,
              range: zoomRange ? zoomRange.xrange : viewBounds.xrange, autorange:false},
       yaxis:{title:'Latitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
+             showgrid: !basemapRaster, zeroline: !basemapRaster,
              range: zoomRange ? zoomRange.yrange : viewBounds.yrange, autorange:false},
       hovermode:'closest',
       annotations: basemapPlaceAnnotations(c),
+      images: basemapLayoutImages(),
       // Keeps whatever zoom/pan the user set across the constant stream of redraws; the
       // revision only changes when the selected incident changes, which re-applies the
       // zoomRange above. (Plotly ignores range changes made in code while uirevision is
