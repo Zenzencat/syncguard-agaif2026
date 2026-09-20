@@ -68,6 +68,47 @@ CREATE INDEX IF NOT EXISTS idx_scored_events_ingest_dedup
     ON scored_events(tower_site_id, obs_timestamp) WHERE obs_timestamp IS NOT NULL;
 """
 
+# Analyst confirm/dismiss (POST /events/{id}/feedback -- see FEEDBACK_LOOP.md).
+#
+# Two tables on purpose:
+#   event_feedback      -- exactly one row per event: the CURRENT label. A relabel replaces
+#                          it (upsert on the primary key), so "what does the analyst say
+#                          about event N" has a single unambiguous answer, and the precision
+#                          numbers in /feedback/summary can't double-count a re-labeled event.
+#   event_feedback_log  -- append-only, every submission ever made, including superseded
+#                          ones. A relabel is information, not noise: it records that an
+#                          analyst changed their mind, which is exactly the kind of signal a
+#                          future retraining effort would want to weigh (or exclude)
+#                          deliberately rather than never know about.
+#
+# No FOREIGN KEY constraint: sqlite3 does not enforce them unless PRAGMA foreign_keys=ON is
+# set per connection, so declaring one here would be decorative. Event existence is checked
+# in the API layer instead, which is also where a useful 404 can be produced.
+_FEEDBACK_SCHEMA = """
+CREATE TABLE IF NOT EXISTS event_feedback (
+    event_id   INTEGER PRIMARY KEY,
+    label      TEXT NOT NULL,          -- 'confirmed' | 'dismissed'
+    note       TEXT,
+    analyst    TEXT,
+    created_at TEXT NOT NULL,          -- when this event was FIRST labeled
+    updated_at TEXT NOT NULL,          -- when the CURRENT label was set
+    revision   INTEGER NOT NULL        -- 1 on first label, +1 per relabel
+);
+CREATE INDEX IF NOT EXISTS idx_event_feedback_label ON event_feedback(label);
+
+CREATE TABLE IF NOT EXISTS event_feedback_log (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id       INTEGER NOT NULL,
+    label          TEXT NOT NULL,
+    previous_label TEXT,               -- NULL on the first label for an event
+    note           TEXT,
+    analyst        TEXT,
+    created_at     TEXT NOT NULL,
+    revision       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_event_feedback_log_event ON event_feedback_log(event_id, id);
+"""
+
 
 class EventStore:
     def __init__(self, db_path: Path | None = None):
@@ -87,6 +128,7 @@ class EventStore:
                         raise  # a real migration failure, not just "already applied"
             # Runs after the ALTERs above, since it indexes a column they add.
             self._conn.executescript(_POST_MIGRATION_INDEXES)
+            self._conn.executescript(_FEEDBACK_SCHEMA)
             self._conn.commit()
 
     @staticmethod
@@ -211,6 +253,156 @@ class EventStore:
                 (tower_site_id,),
             ).fetchone()
         return row[0] if row and row[0] is not None else None
+
+    # ---------------------------------------------------------------- feedback
+    # Analyst confirm/dismiss. These store labels; nothing reads them back into the model.
+    # See FEEDBACK_LOOP.md -- there is no closed loop and no retraining anywhere in this repo.
+
+    def get_feedback(self, event_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM event_feedback WHERE event_id = ?", (event_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_feedback(self, event_id: int, label: str, note: str | None = None,
+                        analyst: str | None = None) -> dict:
+        """Set (or replace) the current label for an event, and append to the audit log.
+
+        Both writes happen inside one transaction under the shared lock, so the log can never
+        record a submission the current-label table did not accept, or vice versa.
+
+        A relabel keeps the ORIGINAL created_at (when the event was first labeled) and bumps
+        revision. The returned record carries previous_label so the caller can tell a first
+        label from a change of mind.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            try:
+                existing = self._conn.execute(
+                    "SELECT label, created_at, revision FROM event_feedback WHERE event_id = ?",
+                    (event_id,),
+                ).fetchone()
+                previous_label = existing["label"] if existing else None
+                created_at = existing["created_at"] if existing else now
+                revision = (existing["revision"] + 1) if existing else 1
+
+                self._conn.execute(
+                    """INSERT INTO event_feedback
+                           (event_id, label, note, analyst, created_at, updated_at, revision)
+                       VALUES (?,?,?,?,?,?,?)
+                       ON CONFLICT(event_id) DO UPDATE SET
+                           label=excluded.label, note=excluded.note, analyst=excluded.analyst,
+                           updated_at=excluded.updated_at, revision=excluded.revision""",
+                    (event_id, label, note, analyst, created_at, now, revision),
+                )
+                self._conn.execute(
+                    """INSERT INTO event_feedback_log
+                           (event_id, label, previous_label, note, analyst, created_at, revision)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (event_id, label, previous_label, note, analyst, now, revision),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+        return {
+            "event_id": event_id, "label": label, "note": note, "analyst": analyst,
+            "created_at": created_at, "updated_at": now, "revision": revision,
+            "previous_label": previous_label,
+        }
+
+    def feedback_history(self, event_id: int) -> list[dict]:
+        """Every label ever submitted for this event, oldest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM event_feedback_log WHERE event_id = ? ORDER BY id ASC",
+                (event_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def labeled_events(self) -> list[dict]:
+        """Every labeled event, joined to its scored_events row -- the export dataset.
+
+        INNER JOIN on purpose: a label whose event row no longer exists (a wiped DB reused
+        alongside a stale label table) is excluded rather than exported with empty features.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT f.event_id   AS event_id,
+                          f.label      AS feedback_label,
+                          f.note       AS feedback_note,
+                          f.analyst    AS feedback_analyst,
+                          f.created_at AS first_labeled_at,
+                          f.updated_at AS labeled_at,
+                          f.revision   AS feedback_revision,
+                          e.*
+                   FROM event_feedback f
+                   JOIN scored_events e ON e.id = f.event_id
+                   ORDER BY f.event_id ASC"""
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d.pop("id", None)  # duplicate of event_id, introduced by the join
+            out.append(d)
+        return out
+
+    def feedback_summary(self) -> dict:
+        """Counts, plus alert precision computed over LABELED EVENTS ONLY.
+
+        The precision denominators are deliberately narrow and these numbers are deliberately
+        NOT called model accuracy. See FEEDBACK_LOOP.md: analysts choose which events to
+        label, so the labeled set is a self-selected, non-random sample of the scored set. A
+        precision figure over it describes that sample and nothing wider.
+        """
+        with self._lock:
+            total_events = self._conn.execute(
+                "SELECT COUNT(*) FROM scored_events").fetchone()[0]
+            by_label = dict(self._conn.execute(
+                "SELECT label, COUNT(*) FROM event_feedback GROUP BY label").fetchall())
+            n_relabeled = self._conn.execute(
+                "SELECT COUNT(*) FROM event_feedback WHERE revision > 1").fetchone()[0]
+            n_submissions = self._conn.execute(
+                "SELECT COUNT(*) FROM event_feedback_log").fetchone()[0]
+            by_source = dict(self._conn.execute(
+                """SELECT e.source, COUNT(*) FROM event_feedback f
+                   JOIN scored_events e ON e.id = f.event_id GROUP BY e.source""").fetchall())
+            n_analysts = self._conn.execute(
+                "SELECT COUNT(DISTINCT analyst) FROM event_feedback "
+                "WHERE analyst IS NOT NULL AND analyst != ''").fetchone()[0]
+
+            def precision(where: str) -> tuple[int, int]:
+                row = self._conn.execute(
+                    "SELECT SUM(CASE WHEN f.label='confirmed' THEN 1 ELSE 0 END), COUNT(*) "
+                    "FROM event_feedback f JOIN scored_events e ON e.id = f.event_id "
+                    "WHERE " + where
+                ).fetchone()
+                return (row[0] or 0), (row[1] or 0)
+
+            pred_conf, pred_total = precision("e.predicted_label = 'attack'")
+            hyst_conf, hyst_total = precision("e.alert_state = 'alerting'")
+
+        confirmed = by_label.get("confirmed", 0)
+        dismissed = by_label.get("dismissed", 0)
+        return {
+            "total_events": total_events,
+            "total_labeled": confirmed + dismissed,
+            "unlabeled": total_events - (confirmed + dismissed),
+            "confirmed": confirmed,
+            "dismissed": dismissed,
+            "relabeled_events": n_relabeled,
+            "total_submissions": n_submissions,
+            "distinct_analysts": n_analysts,
+            "labeled_by_source": by_source,
+            "predicted_attack_labeled": pred_total,
+            "predicted_attack_confirmed": pred_conf,
+            "predicted_attack_precision": (pred_conf / pred_total) if pred_total else None,
+            "hysteresis_alerting_labeled": hyst_total,
+            "hysteresis_alerting_confirmed": hyst_conf,
+            "hysteresis_alert_precision": (hyst_conf / hyst_total) if hyst_total else None,
+        }
 
     def event_count(self) -> int:
         with self._lock:

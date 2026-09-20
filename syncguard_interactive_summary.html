@@ -243,6 +243,37 @@
   .shap-bar-fill{position:absolute; top:0; bottom:0;}
   .shap-bar-fill.attack{background:var(--red); right:50%;}
   .shap-bar-fill.clean{background:var(--blue); left:50%;}
+
+  /* ---- Analyst confirm/dismiss (Phase 2) ----
+     Labels are STORED ONLY -- nothing retrains on them and no closed loop exists.
+     The note under the buttons says so on screen, not just in FEEDBACK_LOOP.md. */
+  #analyst-feedback{margin-top:10px; padding-top:9px; border-top:1px solid var(--rule-soft);}
+  #analyst-feedback .fb-label{color:var(--muted); font-size:10px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px;}
+  #analyst-feedback .fb-row{display:flex; gap:7px; align-items:center; flex-wrap:wrap;}
+  .fb-btn{background:var(--panel); color:var(--ink-2); border:1px solid var(--rule);
+    border-radius:3px; padding:4px 11px; cursor:pointer; font-size:11.5px; font-weight:700;
+    font-family:var(--font-ui);}
+  .fb-btn:not(:disabled):hover{background:var(--wash); color:var(--ink);}
+  .fb-btn:disabled{cursor:default; opacity:.6;}
+  .fb-btn.confirm.active{background:var(--red-tint); border-color:var(--red); color:var(--red);}
+  .fb-btn.dismiss.active{background:var(--green-tint); border-color:var(--green); color:var(--green);}
+  #analyst-feedback .fb-state{font-size:11px; color:var(--ink-2); margin-left:2px;}
+  #analyst-feedback .fb-state.err{color:var(--red);}
+  #analyst-feedback .fb-disclaimer{font-size:10.5px; color:var(--muted); margin-top:6px;
+    line-height:1.45;}
+
+  /* Session-wide label tally under the explanation panel. The precision figure is MEASURED
+     over labeled events only -- a self-selected subset, not the detector's field precision.
+     The title attribute carries that caveat on hover; /feedback/summary carries it in full. */
+  #feedback-strip{display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:6px 14px 7px; border-top:1px solid var(--rule-soft); background:var(--panel-2);
+    font-size:11px; color:var(--ink-2);}
+  #feedback-strip .fs-label{color:var(--muted); font-size:10px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.06em;}
+  #feedback-strip .fs-precision{color:var(--muted);}
+  #feedback-strip a{color:var(--blue); text-decoration:none; font-weight:700; margin-left:auto;}
+  #feedback-strip a:hover{text-decoration:underline;}
   .shap-bar-track .mid{position:absolute; left:50%; top:0; bottom:0; width:1px; background:var(--muted);}
   .shap-val{font-size:11.5px; color:var(--muted); font-family:var(--font-mono);}
   #explain-btn{margin-top:6px;}
@@ -339,6 +370,12 @@
       <div class="shap-wrap">
         <h3 class="h3-row">Why was this flagged? <span class="has-pop"><button type="button" class="info" aria-label="SHAP explanation: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Click a live-map marker or an event-log row to see the top features driving <em>that specific</em> prediction (exact Tree SHAP over the shipped RandomForest — signed contribution to the attack probability, not just a ranking). At replay speeds ≤20x, every event is explained live; faster than that, live explanation is skipped to keep replay at full speed, and an <b>Explain</b> button computes it on demand instead — see <code>SHAP_EXPLAINABILITY.md</code> for why and how this tradeoff is designed.</span></span></span></span></h3>
         <div id="explain-panel"><span class="ph">Click a map marker or log row to see why it was flagged.</span></div>
+        <div id="feedback-strip">
+          <span class="fs-label">Analyst labels</span>
+          <span id="feedback-pill">—</span>
+          <span id="feedback-precision" class="fs-precision">precision —</span>
+          <a href="/feedback/export" id="feedback-export">Export CSV</a>
+        </div>
       </div>
     </div>
   </section>
@@ -635,6 +672,10 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   let allTowers = [];
   const moranIEl = $('moran-i'), moranPEl = $('moran-p'), moranNEl = $('moran-n');
   const speedHintEl = $('speed-hint'), explainPanel = $('explain-panel');
+  const feedbackPillEl = $('feedback-pill'), feedbackPrecisionEl = $('feedback-precision');
+  // event_id -> the API's current feedback record. A cache in front of the API, never
+  // a substitute for it: every panel open re-reads the server and repaints.
+  const feedbackByEvent = new Map();
   const alertPillEl = $('alert-pill'), alertPillTextEl = $('alert-pill-text');
   // HH=hot, LL=cold, LH/HL=outlier. Ring colors come from chartColors().lisa so they stay legible
   // on both the dark control-room plot and the light plot.
@@ -740,7 +781,120 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     explainPanel.innerHTML =
       `<div id="explain-summary">${summary}</div>` +
       `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Exact Tree SHAP over the shipped RandomForest — red = pushes toward attack, teal = pushes toward clean. Bar length ∝ |contribution|.</div>` +
-      shapBarsHtml(topFeatures);
+      shapBarsHtml(topFeatures) +
+      feedbackHtml();
+    wireFeedback(ev.event_id);
+  }
+
+  // ---------- Analyst confirm/dismiss ----------
+  // The label is written to the API (POST /events/{id}/feedback) and read back from it
+  // (GET .../feedback), never held only in the page -- so it survives a reload, and two
+  // people looking at the same event see the same verdict. Nothing here retrains anything.
+  function feedbackHtml(){
+    return `<div id="analyst-feedback">
+      <div class="fb-label">Analyst verdict</div>
+      <div class="fb-row">
+        <button class="fb-btn confirm" id="fb-confirm" disabled>Confirm — real event</button>
+        <button class="fb-btn dismiss" id="fb-dismiss" disabled>Dismiss — false alarm</button>
+        <span class="fb-state" id="fb-state">loading…</span>
+      </div>
+      <div class="fb-disclaimer">Stored for future retraining only. No model is updated and
+        no automated action follows — there is no closed loop (see FEEDBACK_LOOP.md).</div>
+    </div>`;
+  }
+
+  function paintFeedback(record){
+    const confirmBtn = $('fb-confirm'), dismissBtn = $('fb-dismiss'), stateEl = $('fb-state');
+    if(!confirmBtn || !dismissBtn || !stateEl) return;   // panel re-rendered underneath us
+    confirmBtn.disabled = false; dismissBtn.disabled = false;
+    confirmBtn.classList.toggle('active', record.label === 'confirmed');
+    dismissBtn.classList.toggle('active', record.label === 'dismissed');
+    stateEl.classList.remove('err');
+    if(!record.label){
+      stateEl.textContent = 'not yet labeled';
+    }else{
+      const who = record.analyst ? ` by ${record.analyst}` : '';
+      const rev = record.revision > 1 ? ` · revision ${record.revision}` : '';
+      const when = record.updated_at ? new Date(record.updated_at).toLocaleString() : '';
+      stateEl.textContent = `${record.label}${who}${rev} · ${when}`;
+    }
+  }
+
+  async function wireFeedback(eventId){
+    const confirmBtn = $('fb-confirm'), dismissBtn = $('fb-dismiss'), stateEl = $('fb-state');
+    if(!confirmBtn || !dismissBtn || !stateEl) return;
+    if(eventId === undefined || eventId === null){
+      stateEl.textContent = 'no event id to label';
+      return;
+    }
+
+    const send = async (label) => {
+      confirmBtn.disabled = dismissBtn.disabled = true;
+      stateEl.classList.remove('err');
+      stateEl.textContent = 'saving…';
+      try{
+        const res = await fetch(`${base()}/events/${eventId}/feedback`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({label, analyst: analystName()}),
+        });
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        const record = await res.json();
+        feedbackByEvent.set(eventId, record);
+        paintFeedback(record);
+        refreshFeedbackSummary();
+      }catch(err){
+        confirmBtn.disabled = dismissBtn.disabled = false;
+        stateEl.classList.add('err');
+        stateEl.textContent = `could not save: ${err.message}`;
+      }
+    };
+    confirmBtn.addEventListener('click', () => send('confirmed'));
+    dismissBtn.addEventListener('click', () => send('dismissed'));
+
+    // Show the cached label instantly if we have one, then confirm against the API -- the
+    // server is the source of truth, the cache only avoids a blank flash.
+    const cached = feedbackByEvent.get(eventId);
+    if(cached) paintFeedback(cached);
+    try{
+      const record = await fetch(`${base()}/events/${eventId}/feedback`).then(r => {
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+      feedbackByEvent.set(eventId, record);
+      paintFeedback(record);
+    }catch(err){
+      if(!cached){
+        confirmBtn.disabled = dismissBtn.disabled = false;
+        stateEl.classList.add('err');
+        stateEl.textContent = `could not load label: ${err.message}`;
+      }
+    }
+  }
+
+  // Free text, remembered locally. Phase 2 has no authentication, so this is an attribution
+  // hint the analyst types, not an identity the service can vouch for.
+  function analystName(){
+    let name = null;
+    try{ name = localStorage.getItem('syncguard_analyst'); }catch(e){}
+    return name || null;
+  }
+
+  async function refreshFeedbackSummary(){
+    if(!feedbackPillEl) return;
+    try{
+      const s = await fetch(base() + '/feedback/summary').then(r => r.json());
+      feedbackPillEl.textContent = `${s.confirmed} confirmed · ${s.dismissed} dismissed`;
+      // The denominator is labeled events the model called 'attack' -- NOT all labeled
+      // events. Labeling a clean-predicted event leaves this null, so the empty-state copy
+      // has to say which denominator is empty, not "nothing labeled yet".
+      const p = s.predicted_attack_precision;
+      feedbackPrecisionEl.textContent = (p === null || p === undefined)
+        ? 'precision — (no labeled attack-predicted events yet)'
+        : `precision ${(p * 100).toFixed(0)}% over ${s.predicted_attack_labeled} labeled ` +
+          `attack-predicted events`;
+      feedbackPrecisionEl.title = s.caveat || '';
+    }catch(err){ /* transient -- leave the last known values on screen */ }
   }
 
   async function showExplanation(eventId){
@@ -836,6 +990,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       if(moranTimer) clearInterval(moranTimer);
       fetchAutocorrelation();
       moranTimer = setInterval(fetchAutocorrelation, 3000);
+      refreshFeedbackSummary();
     }catch(err){
       setStatus('bad', 'not connected (' + err.message + ')');
       btnStart.disabled = true;
@@ -864,6 +1019,15 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     };
     eventSource.onerror = () => setStatus('bad', 'stream disconnected — click Connect to retry');
   }
+
+  // The export link points at whatever API base the user configured, not the page origin --
+  // the dashboard can be served from somewhere other than the API.
+  function syncExportLink(){
+    const a = $('feedback-export');
+    if(a) a.href = base() + '/feedback/export';
+  }
+  apiBaseInput.addEventListener('change', syncExportLink);
+  syncExportLink();
 
   btnConnect.addEventListener('click', connect);
   btnStart.addEventListener('click', async () => {

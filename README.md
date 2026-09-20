@@ -42,6 +42,10 @@ Not just a model — a running service with an evidence trail:
 | `POST` | `/score` | Score one telemetry reading → probability, severity, label, SHAP top-features; optional live spatial correlation if `tower_site_id` supplied |
 | `POST` | `/ingest` | **Batch ingestion** of per-tower observation windows from an external collector — same scoring path as `/score`, plus per-tower hysteresis, dedup and out-of-order handling. See [INGESTION_CONTRACT.md](INGESTION_CONTRACT.md) |
 | `GET` | `/events/{id}/explain` | On-demand SHAP for an already-scored event (cached after first call) |
+| `POST` | `/events/{id}/feedback` | **Analyst verdict** — `confirmed` / `dismissed`, with optional note and analyst. Relabeling is recorded as a revision. See [FEEDBACK_LOOP.md](FEEDBACK_LOOP.md) |
+| `GET` | `/events/{id}/feedback` · `/feedback/history` | Current label for an event; full submission history |
+| `GET` | `/feedback/export` | All labeled events as CSV (48 columns: label + event + all 23 features) |
+| `GET` | `/feedback/summary` | Label counts + alert precision **over labeled events only** |
 | `GET` | `/towers` | The 136 real tower rows |
 | `GET` | `/events?limit=` | Recent scored events |
 | `GET` | `/events/map` | Latest event per tower — current map state, with `alert_state` |
@@ -135,11 +139,43 @@ sensible-looking vector on the wrong scale gets a confident wrong answer with no
 **Transport is HTTP only.** MQTT is noted there as future work for a real edge fleet; it is
 not implemented, and nothing in this repo speaks to a broker.
 
+### Analyst confirm/dismiss
+
+Click any event in the dashboard's event panel and mark it **Confirm — real event** or
+**Dismiss — false alarm**. The label is written to the API and read back from it on every
+panel open, so it survives a reload and two people see the same verdict.
+
+```bash
+# label an event, then pull the labels back out
+curl -s -X POST localhost:8000/events/42/feedback -H 'content-type: application/json'   -d '{"label":"dismissed","note":"multipath, not spoofing","analyst":"iris"}'
+
+curl -s localhost:8000/feedback/summary
+curl -s localhost:8000/feedback/export -o feedback.csv
+```
+
+> **These labels are stored, not learned from.** Nothing in this repo retrains on them, no
+> model is updated, and no automated action follows from a label — **there is no closed
+> loop.** The precision figure in `/feedback/summary` is measured over *labeled events only*,
+> a self-selected non-random subset, and is **not** the detector's field precision. Read
+> **[FEEDBACK_LOOP.md](FEEDBACK_LOOP.md)** before describing this feature anywhere.
+
 ### Tests
 
 ```bash
-python -m pytest            # 36 tests
+python -m pytest            # 66 tests
 ```
+
+### Packaging
+
+```bash
+make package                # build syncguard_source.zip from `git ls-files` (tracked only)
+make verify-package         # check the archive against the repo
+```
+
+The archive is built from tracked files, so `.env`, `*.db` and `data/external/` cannot end up
+in it. [`make_source_zip.py`](make_source_zip.py) additionally fails loudly if any such path
+has been force-added to git — silently dropping a tracked secret would hide the problem
+rather than surface it.
 
 ---
 

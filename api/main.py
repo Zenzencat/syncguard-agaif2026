@@ -7,22 +7,38 @@ REAL-vs-SIMULATED framing this project holds itself to.
 Run: uvicorn api.main:app --reload   (from the repo root, venv activated)
 """
 import asyncio
+import csv
+import io
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
 from api.schemas import (TelemetryInput, ScoreResponse, HealthResponse, AutocorrelationResponse,
-                         ExplainResponse, IngestBatch, IngestResponse)
+                         ExplainResponse, IngestBatch, IngestResponse, FeedbackRequest,
+                         FeedbackRecord, FeedbackSummary)
 from api.model_service import ModelService, ModelNotFoundError
 from api.db import EventStore
 from api.spatial import load_towers, TowerAttributor, LiveCorrelationEngine
 from api.spatial_stats import compute_autocorrelation
 from api.replay import ReplayManager, EventBus, list_run_ids
 from api.ingest import IngestService, UnknownTowerError
+
+# Attached verbatim to every /feedback/summary response. The numbers are real, but the
+# population they describe is chosen by analysts, not sampled -- so they are not an estimate
+# of the detector's precision in the field, and must not be quoted as one. See
+# FEEDBACK_LOOP.md.
+PRECISION_CAVEAT = (
+    "MEASURED over labeled events only. Analysts choose which events to label, so this is a "
+    "self-selected, non-random subset of all scored events -- not a random sample. These "
+    "figures describe that subset and nothing wider. They are NOT the model's field "
+    "precision, NOT a validation result, and NOT comparable to the held-out test metrics in "
+    "the model reports. No retraining uses these labels -- see FEEDBACK_LOOP.md."
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_PATH = REPO_ROOT / "syncguard_interactive_summary.html"
@@ -201,6 +217,124 @@ async def explain_event(event_id: int):
     top_features = ms.explain(features)
     app.state.event_store.update_event_top_features(event_id, top_features)
     return ExplainResponse(event_id=event_id, top_features=top_features, cached=False)
+
+
+@app.post("/events/{event_id}/feedback", response_model=FeedbackRecord)
+async def submit_feedback(event_id: int, feedback: FeedbackRequest):
+    """Record an analyst's verdict on a scored event: confirmed (real) or dismissed (false
+    alarm).
+
+    Re-submitting replaces the current label and bumps `revision`; the response's
+    `previous_label` says what it replaced. Every submission, including superseded ones, is
+    appended to an audit log (`event_feedback_log`) -- a change of mind is information, not
+    noise.
+
+    These labels are STORED ONLY. Nothing in this repository retrains on them, no model is
+    updated, and no automated action follows from a label. See FEEDBACK_LOOP.md.
+    """
+    store = app.state.event_store
+    if store.get_event(event_id) is None:
+        raise HTTPException(404, f"No scored event with id={event_id}")
+    record = store.upsert_feedback(
+        event_id, feedback.label, note=feedback.note, analyst=feedback.analyst
+    )
+    return FeedbackRecord(**record)
+
+
+@app.get("/events/{event_id}/feedback", response_model=FeedbackRecord)
+async def get_event_feedback(event_id: int):
+    """Current label for one event. 404 if the event does not exist; a record with
+    `label: null, revision: 0` if the event exists but has never been labeled -- the
+    dashboard uses that to render its buttons in the unlabeled state."""
+    store = app.state.event_store
+    if store.get_event(event_id) is None:
+        raise HTTPException(404, f"No scored event with id={event_id}")
+    record = store.get_feedback(event_id)
+    if record is None:
+        return FeedbackRecord(event_id=event_id, label=None, revision=0)
+    return FeedbackRecord(**record)
+
+
+@app.get("/events/{event_id}/feedback/history")
+async def get_event_feedback_history(event_id: int):
+    """Every label ever submitted for this event, oldest first, including superseded ones."""
+    store = app.state.event_store
+    if store.get_event(event_id) is None:
+        raise HTTPException(404, f"No scored event with id={event_id}")
+    return store.feedback_history(event_id)
+
+
+@app.get("/feedback/export")
+async def feedback_export():
+    """Every labeled event as CSV: the label, who set it and when, the full scored-event row,
+    and each of the 23 model features flattened into its own column.
+
+    This is the artifact a future retraining effort would start from. Producing it is as far
+    as this repo goes -- nothing consumes it. See FEEDBACK_LOOP.md.
+
+    Feature columns are emitted in the model's own `feature_cols` order when a model is
+    loaded, so the CSV's column order matches the artifact's. Without a model (the degraded
+    /health state) the order falls back to whatever the stored rows contain, which is stable
+    but not guaranteed to match.
+    """
+    store = app.state.event_store
+    rows = store.labeled_events()
+
+    ms = app.state.model_service
+    if ms is not None:
+        feature_cols = list(ms.feature_cols)
+    else:
+        seen: list[str] = []
+        for r in rows:
+            if r.get("features_json"):
+                for k in json.loads(r["features_json"]):
+                    if k not in seen:
+                        seen.append(k)
+        feature_cols = seen
+
+    meta_cols = [
+        "event_id", "feedback_label", "feedback_analyst", "feedback_note",
+        "labeled_at", "first_labeled_at", "feedback_revision",
+        "created_at", "source", "run_id", "scenario_id", "obs_timestamp", "ingest_batch_id",
+        "attack_type", "true_attack",
+        "probability", "severity", "predicted_label", "alert_state", "model_version",
+        "tower_site_id", "tower_site_name", "tower_lat", "tower_lon", "correlation_score",
+    ]
+
+    buf = io.StringIO(newline="")
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(meta_cols + [f"feature_{c}" for c in feature_cols])
+    for r in rows:
+        features = json.loads(r["features_json"]) if r.get("features_json") else {}
+        writer.writerow(
+            [r.get(c) if r.get(c) is not None else "" for c in meta_cols]
+            + [features.get(c) if features.get(c) is not None else "" for c in feature_cols]
+        )
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition":
+                 f'attachment; filename="syncguard_feedback_{stamp}.csv"'},
+    )
+
+
+@app.get("/feedback/summary", response_model=FeedbackSummary)
+async def feedback_summary():
+    """Label counts, plus alert precision over LABELED EVENTS ONLY.
+
+    Two precision figures, because "alert" has two defensible meanings here:
+      - `predicted_attack_precision` -- over labeled events the model called 'attack'
+        (threshold 0.52, per-reading, no debouncing);
+      - `hysteresis_alert_precision` -- over labeled events whose tower/session was in
+        hysteresis state 'alerting' (3 consecutive above-threshold readings).
+
+    Both come back with the `caveat` field attached, and both are null while their
+    denominator is 0. Read PRECISION_CAVEAT above before quoting either number anywhere.
+    """
+    return FeedbackSummary(**app.state.event_store.feedback_summary(),
+                           caveat=PRECISION_CAVEAT)
 
 
 @app.get("/spatial/autocorrelation", response_model=AutocorrelationResponse)

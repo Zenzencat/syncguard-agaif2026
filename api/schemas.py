@@ -9,7 +9,7 @@ trained pipeline's SimpleImputer(strategy="median") handles missing values the s
 does for the training data.
 """
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 # Cap on a single POST /ingest batch. Not a measured throughput limit -- it is a deliberate
@@ -177,3 +177,51 @@ class IngestResponse(BaseModel):
     alerts: int = Field(description="Of the scored observations, how many left their tower in alert_state='alerting'")
     live_explain: bool = Field(description="Whether SHAP was computed inline for this batch (batch size <= the inline-explain limit)")
     results: list[IngestResult]
+
+
+# ---------------------------------------------------------------------------
+# Analyst confirm/dismiss -- POST /events/{id}/feedback, GET /feedback/*.
+# Labels are STORED ONLY. Nothing in this repo retrains on them, and no closed
+# loop exists. See FEEDBACK_LOOP.md before claiming otherwise anywhere.
+# ---------------------------------------------------------------------------
+
+FeedbackLabel = Literal["confirmed", "dismissed"]
+
+
+class FeedbackRequest(BaseModel):
+    label: FeedbackLabel = Field(description="'confirmed' = the analyst judges this a real event; 'dismissed' = a false alarm. Anything else is a 422.")
+    note: Optional[str] = Field(default=None, max_length=2000, description="Free-text rationale. Stored verbatim, never parsed.")
+    analyst: Optional[str] = Field(default=None, max_length=120, description="Who labeled it. Free text -- there is no authentication behind this in Phase 2, so it is an attribution hint, not an identity. Phase 3 adds API-key auth, which still does not identify an individual analyst.")
+
+
+class FeedbackRecord(BaseModel):
+    event_id: int
+    label: Optional[str] = Field(default=None, description="Current label, or null if this event has never been labeled")
+    note: Optional[str] = None
+    analyst: Optional[str] = None
+    created_at: Optional[str] = Field(default=None, description="When this event was FIRST labeled")
+    updated_at: Optional[str] = Field(default=None, description="When the current label was set")
+    revision: int = Field(default=0, description="0 = never labeled, 1 = labeled once, N = relabeled N-1 times")
+    previous_label: Optional[str] = Field(default=None, description="The label this submission replaced, if any. Only meaningful on a POST response.")
+
+
+class FeedbackSummary(BaseModel):
+    total_events: int
+    total_labeled: int
+    unlabeled: int
+    confirmed: int
+    dismissed: int
+    relabeled_events: int = Field(description="Events whose label has been changed at least once")
+    total_submissions: int = Field(description="Rows in the append-only audit log, including superseded labels")
+    distinct_analysts: int
+    labeled_by_source: dict = Field(default_factory=dict, description="Labeled-event counts by event source ('replay' | 'ingest' | 'api')")
+
+    predicted_attack_labeled: int = Field(description="Labeled events whose predicted_label was 'attack' -- the denominator below")
+    predicted_attack_confirmed: int
+    predicted_attack_precision: Optional[float] = Field(default=None, description="confirmed / labeled, over labeled events predicted 'attack'. null when the denominator is 0.")
+
+    hysteresis_alerting_labeled: int = Field(description="Labeled events whose alert_state was 'alerting' -- the denominator below")
+    hysteresis_alerting_confirmed: int
+    hysteresis_alert_precision: Optional[float] = Field(default=None, description="confirmed / labeled, over labeled events in hysteresis state 'alerting'. null when the denominator is 0.")
+
+    caveat: str = Field(description="Plain-language statement of what these precision numbers are not")
