@@ -15,12 +15,14 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 
-from api.schemas import TelemetryInput, ScoreResponse, HealthResponse, AutocorrelationResponse, ExplainResponse
+from api.schemas import (TelemetryInput, ScoreResponse, HealthResponse, AutocorrelationResponse,
+                         ExplainResponse, IngestBatch, IngestResponse)
 from api.model_service import ModelService, ModelNotFoundError
 from api.db import EventStore
 from api.spatial import load_towers, TowerAttributor, LiveCorrelationEngine
 from api.spatial_stats import compute_autocorrelation
 from api.replay import ReplayManager, EventBus, list_run_ids
+from api.ingest import IngestService, UnknownTowerError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_PATH = REPO_ROOT / "syncguard_interactive_summary.html"
@@ -42,6 +44,10 @@ async def lifespan(app: FastAPI):
     app.state.tower_attributor = TowerAttributor(towers)
     app.state.correlation_engine = LiveCorrelationEngine(towers, app.state.event_store)
     app.state.event_bus = EventBus()
+    app.state.ingest_service = IngestService(
+        app.state.model_service, app.state.event_store, towers,
+        app.state.correlation_engine, app.state.event_bus,
+    ) if app.state.model_service else None
     app.state.replay_manager = ReplayManager(
         app.state.model_service, app.state.event_store, app.state.tower_attributor,
         app.state.correlation_engine, app.state.event_bus,
@@ -129,6 +135,31 @@ async def score(telemetry: TelemetryInput):
     })
 
     return ScoreResponse(**result, event_id=event_id, tower=tower, correlation=corr, top_features=top_features)
+
+
+@app.post("/ingest", response_model=IngestResponse)
+async def ingest(batch: IngestBatch):
+    """Batch ingestion of per-tower observation windows from an external collector.
+
+    Routes through the same ModelService.score() call as POST /score -- same artifact, same
+    23 features, same 0.52 threshold, same single-threaded predict_proba -- then adds
+    per-tower hysteresis, (tower_id, timestamp) deduplication, out-of-order detection, the
+    same SQLite persistence, and the same SSE publish replay uses, so ingested events appear
+    on the dashboard and in the live spatial statistics exactly like replayed ones.
+
+    The 23 features must be computed caller-side; INGESTION_CONTRACT.md documents which raw
+    receiver observables produce each one. HTTP only -- MQTT is noted as future work there,
+    not implemented. See api/ingest.py for the full REAL/CALLER-SUPPLIED framing: the
+    tower each observation claims to come from is trusted, not verified, and no real receiver
+    has ever fed this endpoint.
+    """
+    _require_model(app)
+    if app.state.ingest_service is None:
+        raise HTTPException(503, "No trained model loaded -- run `make train` first, then restart the service.")
+    try:
+        return IngestResponse(**await app.state.ingest_service.ingest(batch))
+    except UnknownTowerError as e:
+        raise HTTPException(422, str(e))
 
 
 @app.get("/towers")

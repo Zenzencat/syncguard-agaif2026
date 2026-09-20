@@ -5,18 +5,23 @@ that would matter. A single connection is shared across the app and guarded by a
 sqlite3 connections aren't safe for concurrent use across threads/tasks without one.
 """
 import json
+import os
 import sqlite3
 import threading
 from pathlib import Path
 from datetime import datetime, timezone
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "syncguard.db"
+# SYNCGUARD_DB_PATH overrides the default location. Added so the test suite can point the
+# whole app at a throwaway DB instead of the real one -- the container and normal local runs
+# don't set it and get the committed default.
+DEFAULT_DB_PATH = Path(os.environ.get("SYNCGUARD_DB_PATH")
+                       or Path(__file__).resolve().parent.parent / "data" / "syncguard.db")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS scored_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
-    source TEXT NOT NULL,              -- 'api' | 'replay'
+    source TEXT NOT NULL,              -- 'api' (POST /score) | 'replay' | 'ingest' (POST /ingest)
     run_id TEXT,
     scenario_id TEXT,
     attack_type TEXT,                  -- ground truth, only populated by replay (from the dataset)
@@ -49,7 +54,19 @@ _MIGRATIONS = [
     # simulated tower. NULL for events scored before this migration or via /score (hysteresis
     # doesn't apply to stateless ad-hoc calls -- see api/hysteresis.py's module docstring).
     "ALTER TABLE scored_events ADD COLUMN alert_state TEXT",
+    # Ingestion adapter (POST /ingest, api/ingest.py, INGESTION_CONTRACT.md).
+    # obs_timestamp is the caller-stated UTC observation time of the window -- distinct from
+    # created_at, which is when this service scored it. NULL for /score and replay rows
+    # (neither carries a caller-stated observation time), which is also why deduplication is
+    # scoped to rows with source='ingest': a NULL obs_timestamp can never collide.
+    "ALTER TABLE scored_events ADD COLUMN obs_timestamp TEXT",
+    "ALTER TABLE scored_events ADD COLUMN ingest_batch_id TEXT",
 ]
+
+_POST_MIGRATION_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_scored_events_ingest_dedup
+    ON scored_events(tower_site_id, obs_timestamp) WHERE obs_timestamp IS NOT NULL;
+"""
 
 
 class EventStore:
@@ -68,6 +85,8 @@ class EventStore:
                 except sqlite3.OperationalError as e:
                     if "duplicate column name" not in str(e):
                         raise  # a real migration failure, not just "already applied"
+            # Runs after the ALTERs above, since it indexes a column they add.
+            self._conn.executescript(_POST_MIGRATION_INDEXES)
             self._conn.commit()
 
     @staticmethod
@@ -84,8 +103,9 @@ class EventStore:
                    (created_at, source, run_id, scenario_id, attack_type, true_attack,
                     probability, severity, predicted_label, model_version,
                     tower_site_id, tower_site_name, tower_lat, tower_lon,
-                    correlation_score, features_json, top_features_json, alert_state)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    correlation_score, features_json, top_features_json, alert_state,
+                    obs_timestamp, ingest_batch_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     event.get("created_at") or datetime.now(timezone.utc).isoformat(),
                     event["source"],
@@ -105,6 +125,8 @@ class EventStore:
                     json.dumps(event.get("features")) if event.get("features") is not None else None,
                     json.dumps(event.get("top_features")) if event.get("top_features") is not None else None,
                     event.get("alert_state"),
+                    event.get("obs_timestamp"),
+                    event.get("ingest_batch_id"),
                 ),
             )
             self._conn.commit()
@@ -163,6 +185,32 @@ class EventStore:
                    ON s.tower_site_id = latest.tower_site_id AND s.id = latest.max_id"""
             ).fetchall()
         return {r["tower_site_id"]: self._row_to_dict(r) for r in rows}
+
+    def find_ingested_event(self, tower_site_id: str, obs_timestamp_iso: str) -> dict | None:
+        """Duplicate lookup for POST /ingest: has this exact (tower, observation timestamp)
+        already been ingested? Scoped to source='ingest' rows -- a /score or replay row has a
+        NULL obs_timestamp and cannot collide. Returns the ORIGINAL row, so a duplicate
+        submission can be answered with the first event_id instead of scoring again."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM scored_events WHERE source = 'ingest' AND tower_site_id = ? "
+                "AND obs_timestamp = ? ORDER BY id ASC LIMIT 1",
+                (tower_site_id, obs_timestamp_iso),
+            ).fetchone()
+        return self._row_to_dict(row) if row else None
+
+    def max_ingested_obs_timestamp(self, tower_site_id: str) -> str | None:
+        """Newest observation timestamp already ingested for this tower, or None. Used to
+        flag out-of-order observations -- compared as an ISO-8601 string, which orders
+        correctly because api/ingest.py normalizes every timestamp to UTC with a fixed
+        format before it is stored (see _iso_utc there)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MAX(obs_timestamp) FROM scored_events "
+                "WHERE source = 'ingest' AND tower_site_id = ?",
+                (tower_site_id,),
+            ).fetchone()
+        return row[0] if row and row[0] is not None else None
 
     def event_count(self) -> int:
         with self._lock:

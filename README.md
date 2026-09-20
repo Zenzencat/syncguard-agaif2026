@@ -40,6 +40,7 @@ Not just a model — a running service with an evidence trail:
 |---|---|---|
 | `GET` | `/health` | Model-loaded status, tower count, replay-running flag |
 | `POST` | `/score` | Score one telemetry reading → probability, severity, label, SHAP top-features; optional live spatial correlation if `tower_site_id` supplied |
+| `POST` | `/ingest` | **Batch ingestion** of per-tower observation windows from an external collector — same scoring path as `/score`, plus per-tower hysteresis, dedup and out-of-order handling. See [INGESTION_CONTRACT.md](INGESTION_CONTRACT.md) |
 | `GET` | `/events/{id}/explain` | On-demand SHAP for an already-scored event (cached after first call) |
 | `GET` | `/towers` | The 136 real tower rows |
 | `GET` | `/events?limit=` | Recent scored events |
@@ -95,6 +96,49 @@ curl -s -X POST localhost:8000/score -H 'content-type: application/json' \
 curl -s -X POST "localhost:8000/replay/start?speed=25"
 curl -sN localhost:8000/stream/events
 curl -s localhost:8000/spatial/autocorrelation
+```
+
+### Ingesting from an external collector
+
+`POST /ingest` takes a batch of per-tower observation windows — each one the **23-feature
+vector already extracted**, plus the tower it came from and the UTC time it was observed. It
+routes through the same `ModelService.score()` call `/score` uses (same artifact, same 23
+features, same 0.52 threshold, same single-threaded `predict_proba`), then adds per-tower
+alert hysteresis, `(tower_id, timestamp)` deduplication, out-of-order detection, SQLite
+persistence and the SSE publish — so ingested events land on the dashboard map, the event
+log and the live spatial statistics exactly like replayed ones.
+
+```bash
+# sample batch + printed alerts (stdlib only, nothing to install)
+python examples/ingest_client.py
+
+# or by hand — tower_id must be a real tower_key from /towers; feature values below are the
+# medians of the real attack-labeled rows (SYNTHETIC, built from real statistics)
+curl -s -X POST localhost:8000/ingest -H 'content-type: application/json' \
+  -d '{"batch_id":"curl-demo","observations":[{
+    "tower_id":"MPW012","timestamp":"2026-09-20T06:00:00Z",
+    "fixType":3.0,"gSpeed":0.026,"hAcc":0.331,"vAcc":0.613,"sAcc":0.078,
+    "headAcc":0.1504,"pDOP":0.0109,"numSV":31.0,
+    "velN":-0.001,"velE":0.0,"velD":-0.001,"pos_dev_m":2.7085,
+    "n_sats_l1":39.0,"snr_l1_mean":39.4688,"snr_l1_std":5.2149,"snr_l1_min":27.0,
+    "doppler_l1_mean":-61.3147,"doppler_l1_std":2096.3066,
+    "pr_doppler_residual_mean":2.8694,"pr_doppler_residual_std":177.2779,
+    "jam_ind_mean":14.0,"agc_cnt_mean":3159.0,"noise_per_ms_mean":102.0}]}'
+```
+
+Read **[INGESTION_CONTRACT.md](INGESTION_CONTRACT.md)** before writing a collector. It
+specifies which raw receiver observables produce each of the 23 features, the exact filters
+and residual formula involved, and — the part that actually bites — the **units and scales**,
+which are the raw Jammertest CSV scales, not the ones a GNSS engineer would guess. A
+sensible-looking vector on the wrong scale gets a confident wrong answer with no error.
+
+**Transport is HTTP only.** MQTT is noted there as future work for a real edge fleet; it is
+not implemented, and nothing in this repo speaks to a broker.
+
+### Tests
+
+```bash
+python -m pytest            # 36 tests
 ```
 
 ---

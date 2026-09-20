@@ -1,0 +1,8 @@
+# Test-only dependencies. Not needed to run the service -- requirements.txt +
+# requirements-api.txt are still the full runtime set, and the Docker image installs only
+# those. Pinned from the start; Phase 3 pins the runtime files too and adds CI.
+pytest==8.3.4
+
+# FastAPI's TestClient is a thin wrapper over httpx's ASGI transport -- starlette declares it
+# as an optional extra, so it has to be installed explicitly for the suite to import.
+httpx==0.28.1

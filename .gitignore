@@ -26,3 +26,6 @@ models/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Local Claude Code / dev-tooling config (e.g. preview launch.json) -- machine-specific, not part of the project.
+.claude/

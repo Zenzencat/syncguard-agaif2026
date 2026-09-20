@@ -6,266 +6,384 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 <style>
+  /* Dark control-room theme is the default (TOC wall-display look). Light theme (the original
+     deck-sampled palette) is opt-in via :root[data-theme="light"]. */
   :root{
-    --bg:#0A121C; --panel:#111c2b; --panel-border:#263647;
-    --text:#EAF1F7; --muted:#94A7BA;
-    --real:#3fb8af; --real-bg:#0f2a29; --real-border:#1f6b64;
-    --sim:#FF8A3D; --sim-bg:#2a1c0f; --sim-border:#a8541c;
-    --accent:#FF4D68;
+    color-scheme:dark;
+    --bg:#0B1119; --panel:#121D2B; --panel-2:#0E1826; --inset:#0B1420;
+    --ink:#E7ECF3; --ink-2:#B4C0D0; --muted:#8492A6;
+    --rule:#283648; --rule-soft:#1C2837; --wash:#182636;
+    --blue:#4F9BD8;   --blue-tint:#12283C;
+    --red:#E85D62;    --red-tint:#2C1417;
+    --green:#46B67C;  --green-tint:#0E2B1F;
+    --orange:#E0973F; --orange-tint:#2C2012; --orange-text:#E7A552;
+    --diag:rgba(79,155,216,.20); --offdiag:rgba(232,93,98,.16);
+    --shadow:rgba(0,0,0,.45);
+    --real:var(--blue); --sim:var(--orange); --live:var(--green); --accent:var(--red);
+    --text:var(--ink);
+    --font-ui:'DejaVu Sans',Verdana,'Segoe UI',sans-serif;
+    --font-mono:'DejaVu Sans Mono',Consolas,'Courier New',monospace; /* real data only */
+  }
+  :root[data-theme="light"]{
+    color-scheme:light;
+    --bg:#F6F3EC; --panel:#FFFFFF; --panel-2:#FFFFFF; --inset:#FFFFFF;
+    --ink:#1B2430; --ink-2:#3E4757; --muted:#5B6472;
+    --rule:#C7C2B4; --rule-soft:#DDD8CA; --wash:#EFEBE0;
+    --blue:#2A5C82;   --blue-tint:#EAF1F6;
+    --red:#A83232;    --red-tint:#F7EAEA;
+    --green:#2F6E44;  --green-tint:#EAF3ED;
+    --orange:#B8792A; --orange-tint:#F7EBDC; --orange-text:#7F6129;
+    --diag:rgba(42,92,130,.14); --offdiag:rgba(168,50,50,.10);
+    --shadow:rgba(27,36,48,.14);
   }
   *{box-sizing:border-box;}
-  body{
-    margin:0; background:var(--bg); color:var(--text);
-    font-family:Calibri,Arial,sans-serif; line-height:1.45;
+  html,body{height:100%;}
+  body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-ui); line-height:1.4; font-size:13px;
+    height:100vh; display:flex; flex-direction:column; overflow:hidden;}
+  code{font-family:inherit; font-size:.95em; color:var(--ink); background:var(--wash); padding:0 .28em; border-radius:2px;}
+
+  /* ---- Top bar: title left, provenance key + theme toggle right ---- */
+  header{flex:none; background:var(--panel); border-bottom:1px solid var(--rule);}
+  .hdr{display:flex; align-items:center; justify-content:space-between; gap:8px 20px; flex-wrap:wrap; padding:7px clamp(14px,3vw,32px);}
+  header h1{margin:0; font-size:16.5px; font-weight:700; display:flex; align-items:center; gap:6px; letter-spacing:.01em;}
+  .hdr-right{display:flex; align-items:center; gap:9px 16px; flex-wrap:wrap;}
+  .legend{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .legend-key{font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; display:inline-flex; align-items:center; gap:3px;}
+  .theme-btn{background:var(--wash); color:var(--ink-2); border:1px solid var(--rule); border-radius:4px; padding:5px 11px; font:600 11.5px/1 var(--font-ui); cursor:pointer; letter-spacing:.03em; display:inline-flex; align-items:center; gap:6px; white-space:nowrap;}
+  .theme-btn:hover{border-color:var(--blue); color:var(--ink);}
+
+  /* ---- Tag + info popover: compact label by default, full original text on hover/tap ---- */
+  .tag{--c:var(--orange); --tint:var(--orange-tint); --c-text:var(--orange-text);
+    position:relative; display:inline-flex; align-items:center; gap:3px; vertical-align:middle;
+    background:var(--tint); border-top:2px solid var(--c); padding:2px 6px 2px 8px;
+    font-size:10.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--c-text);}
+  .tag.real{--c:var(--blue); --tint:var(--blue-tint); --c-text:var(--blue);}
+  .tag.live{--c:var(--green); --tint:var(--green-tint); --c-text:var(--green);}
+  .has-pop{position:relative;}
+  .info{font:inherit; font-size:13px; line-height:1; letter-spacing:0; text-transform:none; color:inherit; background:none; border:0; padding:0 1px; margin-left:2px; cursor:help; opacity:.8;}
+  .info:hover,.info:focus-visible,.has-pop.open > .info{opacity:1;}
+  .info:focus-visible{outline:2px solid var(--blue); outline-offset:2px; border-radius:50%;}
+  .pop{display:none; position:absolute; top:100%; left:0; z-index:60; padding-top:6px; width:max-content;
+    max-width:min(560px, calc(100vw - 24px)); white-space:normal; text-align:left; text-transform:none;
+    letter-spacing:normal; font-weight:400; font-size:12.5px; line-height:1.5; color:var(--ink-2); font-family:var(--font-ui);}
+  .pop.up{top:auto; bottom:100%; padding-top:0; padding-bottom:6px;}
+  .has-pop:hover > .pop,.has-pop.open > .pop{display:block;}
+  .pop-body{display:block; background:var(--panel); border:1px solid var(--rule); border-top:3px solid var(--c,var(--ink)); padding:9px 12px 10px; box-shadow:0 6px 18px var(--shadow);}
+  .pop-label{display:block; font-size:10.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--c-text,var(--muted)); margin:9px 0 2px;}
+  .pop-body > :first-child{margin-top:0;}
+  .pop-p{display:block;}
+  .pop-p + .pop-p{margin-top:6px;}
+  .pop code{background:var(--wash);}
+
+  /* ---- Status bar: always-visible vitals; hero recall is the single focal point ---- */
+  .kpi-strip{flex:none; display:flex; align-items:stretch; gap:12px clamp(18px,3vw,46px); flex-wrap:wrap; padding:14px clamp(14px,3vw,32px) 15px; background:var(--panel-2); border-bottom:1px solid var(--rule);}
+  .kpi-group{--c:var(--blue); border-left:3px solid var(--c); padding-left:14px; display:flex; flex-direction:column; justify-content:center;}
+  .kpi-group.live{--c:var(--green);}
+  .kpi-eyebrow{font-size:9.5px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:var(--c); margin-bottom:7px;}
+  /* baseline alignment lines up the value digits themselves, so a tile with an extra
+     sub-line (Moran p-value) or a pill doesn't float its number out of the row */
+  .kpi-tiles{display:flex; gap:9px 32px; align-items:baseline; flex-wrap:wrap;}
+  .kpi-strip .stat .v{font-size:26px;}
+  .kpi-strip .stat.hero{padding-right:8px;}
+  .kpi-strip .stat.hero .v{font-size:56px; color:var(--ink); letter-spacing:-.02em; line-height:1;}
+  .kpi-strip .stat .l{display:flex; align-items:center;}
+  .stat{min-width:0;}
+  .stat .v{font-size:20px; font-weight:700; font-family:var(--font-mono); font-variant-numeric:tabular-nums; color:var(--ink); line-height:1.04;}
+  /* Labels demoted: smaller, muted, wider tracking — they never compete with the figure */
+  .stat .l{font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.11em; font-weight:600; margin-top:5px;}
+  .stat .s{font-size:10.5px; color:var(--muted); font-variant-numeric:tabular-nums; margin-top:2px;}
+  .stat .s span{font-family:var(--font-mono);}
+
+  /* ---- Tab navigation ---- */
+  .tabs{flex:none; display:flex; align-items:stretch; gap:2px; padding:0 clamp(14px,3vw,32px); background:var(--panel); border-bottom:1px solid var(--rule);}
+  .tab-btn{appearance:none; background:none; border:0; border-bottom:2.5px solid transparent; color:var(--muted); font:700 12px/1 var(--font-ui); letter-spacing:.03em; padding:10px 15px 9px; cursor:pointer; display:inline-flex; align-items:center; gap:7px;}
+  .tab-btn:hover{color:var(--ink-2);}
+  .tab-btn.active{color:var(--ink);}
+  .tab-btn.live.active{border-bottom-color:var(--green);}
+  .tab-btn.sim.active{border-bottom-color:var(--orange);}
+  .tab-btn.real.active{border-bottom-color:var(--blue);}
+  .tab-btn .dotc{width:7px; height:7px; border-radius:50%; background:var(--muted); flex:none;}
+  .tab-btn.live .dotc{background:var(--green);} .tab-btn.sim .dotc{background:var(--orange);} .tab-btn.real .dotc{background:var(--blue);}
+
+  /* ---- Tab area: fills remaining viewport, no page scroll ---- */
+  .tabwrap{flex:1 1 auto; min-height:0; position:relative;}
+  .tab-panel{position:absolute; inset:0; overflow:hidden; display:none;}
+  .tab-panel.active{display:grid;}
+
+  /* Live operations panel */
+  .panel-live{grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); gap:9px 16px; padding:9px clamp(14px,3vw,32px) 11px;}
+  .panel-live .ctl-bar{grid-column:1 / -1; margin:0;}
+  .map-col{grid-column:1; grid-row:2; display:flex; flex-direction:column; min-height:0; gap:5px;}
+  .side-col{grid-column:2; grid-row:2; display:flex; flex-direction:column; min-height:0; gap:7px;}
+  .log-wrap{flex:1.2 1 0; min-height:0; display:flex; flex-direction:column;}
+  .shap-wrap{flex:1 1 0; min-height:0; display:flex; flex-direction:column;}
+
+  /* Severity map panel */
+  .panel-map{grid-template-columns:1fr; grid-template-rows:auto auto minmax(0,1fr) auto; gap:7px; padding:9px clamp(14px,3vw,32px) 11px;}
+
+  /* Detector evidence panel */
+  .panel-eval{grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr); gap:7px 22px; padding:9px clamp(14px,3vw,32px) 11px;}
+  .panel-eval .panel-bar,.panel-eval .stat-row{grid-column:1 / -1;}
+  /* Keep the two tables as one compact group, centered as a unit against the chart — filling
+     the column height without spreading the tables apart. */
+  .eval-left{grid-column:1; grid-row:3; min-height:0; overflow:auto; display:flex; flex-direction:column; justify-content:center; gap:16px;}
+  .eval-block{flex:0 0 auto; display:flex; flex-direction:column; gap:6px;}
+  .eval-right{grid-column:2; grid-row:3; min-height:0; display:flex; flex-direction:column; gap:4px;}
+
+  /* Panel header row (provenance tag + title + ⓘ) */
+  .panel-bar{display:flex; align-items:center; gap:5px 12px; flex-wrap:wrap;}
+  .panel-bar h2{margin:0; font-size:14px; font-weight:700;}
+  .panel-bar .sec-sub{font-size:11px; color:var(--muted);}
+
+  /* Chart fill: chart div stretches to its flex/grid cell */
+  .chart-fill{position:relative; flex:1 1 auto; min-height:0; background:var(--panel-2); border:1px solid var(--rule-soft);}
+  .chart-fill > div[id]{position:absolute; inset:0; width:100% !important; height:100% !important;}
+
+  h3{margin:0 0 3px; padding-bottom:3px; font-size:10.5px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.09em; border-bottom:1px solid var(--rule-soft);}
+  h3.h3-row{display:block;}
+
+  @media (max-width:1000px){
+    .panel-live{grid-template-columns:1fr; grid-template-rows:auto minmax(200px,1.2fr) minmax(200px,1fr);}
+    .map-col{grid-column:1; grid-row:2;} .side-col{grid-column:1; grid-row:3;}
+    .panel-eval{grid-template-columns:1fr; grid-template-rows:auto auto auto minmax(200px,1fr);}
+    .eval-left{grid-column:1; grid-row:3;} .eval-right{grid-column:1; grid-row:4;}
   }
-  header{
-    padding:28px clamp(16px,4vw,48px) 18px; border-bottom:1px solid var(--panel-border);
-  }
-  header h1{margin:0 0 6px; font-size:28px; font-weight:700;}
-  header p.sub{margin:0; color:var(--muted); font-size:15px; max-width:900px;}
-  .legend{
-    display:flex; gap:14px; flex-wrap:wrap; margin-top:16px;
-  }
-  .legend .badge{
-    display:flex; align-items:center; gap:8px; padding:8px 14px; border-radius:8px;
-    font-size:13px; font-weight:600; letter-spacing:.02em;
-  }
-  .badge.real{background:var(--real-bg); border:1px solid var(--real-border); color:var(--real);}
-  .badge.sim{background:var(--sim-bg); border:1px solid var(--sim-border); color:var(--sim);}
-  .badge .dot{width:10px; height:10px; border-radius:50%; background:currentColor; flex:none;}
-  main{padding:24px clamp(16px,4vw,48px) 60px; display:flex; flex-direction:column; gap:28px;}
-  section.card{
-    background:var(--panel); border:1px solid var(--panel-border); border-radius:12px;
-    padding:22px clamp(14px,3vw,28px);
-  }
-  section.card.real-zone{border-color:var(--real-border);}
-  section.card.sim-zone{border-color:var(--sim-border);}
-  .zone-tag{
-    display:inline-block; font-size:11px; font-weight:800; letter-spacing:.08em;
-    text-transform:uppercase; padding:4px 10px; border-radius:6px; margin-bottom:10px;
-  }
-  .zone-tag.sim{background:var(--sim-bg); color:var(--sim); border:1px solid var(--sim-border);}
-  .zone-tag.real{background:var(--real-bg); color:var(--real); border:1px solid var(--real-border);}
-  h2{margin:2px 0 4px; font-size:20px;}
-  h3{margin:18px 0 8px; font-size:15px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.04em;}
-  p.note{color:var(--muted); font-size:13.5px; margin:6px 0 0;}
-  .controls{
-    display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin:16px 0 6px;
-    background:#0d1622; border:1px solid var(--panel-border); border-radius:10px; padding:14px 18px;
-  }
-  .controls label{font-size:13px; color:var(--muted); font-weight:600;}
-  .controls input[type=range]{width:min(360px,60vw); accent-color:var(--sim);}
+
+  /* ---- Controls ---- */
+  .ctl-bar{display:flex; align-items:center; gap:6px 22px; flex-wrap:wrap; background:var(--wash); border-radius:3px; padding:7px 12px; margin:0 0 8px;}
+  .api-row,.ctl-bar .controls{display:flex; align-items:center; gap:8px 12px; flex-wrap:wrap; margin:0; padding:0; background:none;}
+  .conn-advanced{display:inline-flex; align-items:center; gap:6px 10px;}
+  .conn-advanced[hidden]{display:none;}
+  .conn-toggle{font-weight:600;}
+  .conn-toggle[aria-expanded="true"]{background:var(--wash); border-color:var(--blue); color:var(--ink);}
+  .controls{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 6px; background:var(--wash); border-radius:3px; padding:7px 12px;}
+  .controls label,.api-row label{font-size:12px; color:var(--ink-2); font-weight:600;}
+  .controls input[type=range]{width:min(320px,50vw); accent-color:var(--orange);}
   .tstep-btns{display:flex; gap:6px;}
-  .tstep-btns button{
-    background:#182636; color:var(--text); border:1px solid var(--panel-border); border-radius:6px;
-    padding:6px 12px; cursor:pointer; font-size:13px; font-weight:600;
-  }
-  .tstep-btns button.active{background:var(--sim-bg); border-color:var(--sim-border); color:var(--sim);}
-  .counter{
-    font-size:14px; font-weight:700; color:var(--sim); background:var(--sim-bg);
-    border:1px solid var(--sim-border); padding:8px 14px; border-radius:8px;
-  }
-  .counter span{font-size:20px; margin-right:4px;}
-  #map{width:100%; height:560px;}
-  .grid2{display:grid; grid-template-columns:1.1fr .9fr; gap:22px;}
-  @media (max-width:900px){ .grid2{grid-template-columns:1fr;} }
-  table{width:100%; border-collapse:collapse; font-size:13.5px;}
-  th,td{padding:7px 10px; text-align:right; border-bottom:1px solid var(--panel-border);}
-  th:first-child,td:first-child{text-align:left; color:var(--muted);}
-  thead th{color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em;}
-  .cm-table td, .cm-table th{text-align:center;}
-  .cm-table .diag{background:rgba(63,184,175,.14); font-weight:700;}
-  .cm-table .offdiag{background:rgba(255,77,104,.10);}
-  .stat-row{display:flex; gap:26px; flex-wrap:wrap; margin:12px 0 4px;}
-  .stat{min-width:110px;}
-  .stat .v{font-size:22px; font-weight:800;}
-  .stat .l{font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em;}
-  footer{padding:18px clamp(16px,4vw,48px) 40px; color:var(--muted); font-size:12.5px; border-top:1px solid var(--panel-border);}
-  #fi-chart, #cm-chart{width:100%; height:380px;}
-
-  /* ---- Live replay section ---- */
-  .badge.live{background:#0f1f2a; border:1px solid #1f5f8f; color:#4da3ff;}
-  .zone-tag.live{background:#0f1f2a; color:#4da3ff; border:1px solid #1f5f8f;}
-  section.card.live-zone{border-color:#1f5f8f;}
-  .api-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;}
-  .api-row input[type=text]{
-    background:#0d1622; border:1px solid var(--panel-border); color:var(--text);
-    border-radius:6px; padding:7px 10px; font-size:13px; min-width:220px;
-  }
-  .pill{display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border-radius:20px; font-size:12.5px; font-weight:700;}
-  .pill .dot{width:8px; height:8px; border-radius:50%; background:currentColor;}
-  .pill.ok{background:#0f2a29; color:var(--real); border:1px solid var(--real-border);}
-  .pill.bad{background:#2a1414; color:#ff6b6b; border:1px solid #7a2323;}
-  .pill.pending{background:#221c0f; color:#e6c34d; border:1px solid #6b5a1f;}
-  .pill.alerting{background:#2a1414; color:#ff8a3d; border:1px solid #a8541c;}
-  .pill.normal{background:#0f2a29; color:var(--real); border:1px solid var(--real-border);}
-  .btn{
-    background:#182636; color:var(--text); border:1px solid var(--panel-border); border-radius:6px;
-    padding:8px 16px; cursor:pointer; font-size:13px; font-weight:700;
-  }
-  .btn.primary{background:#12324a; border-color:#1f5f8f; color:#4da3ff;}
-  .btn.stop{background:#2a1414; border-color:#7a2323; color:#ff8080;}
+  .tstep-btns button{background:var(--panel); color:var(--ink); border:1px solid var(--rule); border-radius:3px; padding:4px 11px; cursor:pointer; font-size:12px; font-weight:600; font-family:var(--font-ui);}
+  .tstep-btns button.active{background:var(--orange-tint); border-color:var(--orange); color:var(--orange-text);}
+  #speed-hint{font-size:11.5px; color:var(--muted); margin:0;}
+  .counter{--c:var(--orange); --tint:var(--orange-tint); --c-text:var(--orange-text);
+    font-size:12px; color:var(--ink-2); background:var(--tint); border-left:3px solid var(--c); padding:4px 11px;}
+  .counter span{font-family:var(--font-mono); font-size:18px; font-weight:700; color:var(--c-text); margin-right:3px;}
+  .sparkline{vertical-align:middle; margin-left:6px;}
+  .api-row input[type=text]{background:var(--inset); border:1px solid var(--rule); color:var(--ink); border-radius:3px; padding:5px 9px; font-size:12px; min-width:0; flex:1 1 150px; max-width:260px; font-family:var(--font-ui);}
+  .pill{display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:3px; font-size:11.5px; font-weight:700; font-family:var(--font-ui); letter-spacing:0; text-transform:none;}
+  .pill .dot{width:7px; height:7px; border-radius:50%; background:currentColor;}
+  .pill.ok,.pill.normal{background:var(--green-tint); color:var(--green); border:1px solid rgba(47,110,68,.38);}
+  .pill.bad{background:var(--red-tint); color:var(--red); border:1px solid rgba(168,50,50,.45);}
+  .pill.pending{background:var(--panel); color:var(--ink-2); border:1px solid var(--rule);}
+  /* deep red so white text clears AA (bright --red would only hit ~3.4:1 on dark) */
+  .pill.alerting{background:#A83232; color:#fff; border:1px solid var(--red);}
+  .btn{background:var(--panel); color:var(--ink); border:1px solid var(--rule); border-radius:3px; padding:5px 13px; cursor:pointer; font-size:12px; font-weight:700; font-family:var(--font-ui);}
+  .btn:not(:disabled):hover{background:var(--wash);}
+  /* deep blue keeps white label at ~7:1 in both themes (bright dark --blue would be ~3:1) */
+  .btn.primary{background:#2A5C82; border-color:var(--blue); color:#fff;}
+  .btn.primary:not(:disabled):hover{background:#234E6F;}
+  .btn.stop{background:var(--panel); border-color:var(--red); color:var(--red);}
   .btn:disabled{opacity:.45; cursor:not-allowed;}
-  select.ctl{background:#0d1622; border:1px solid var(--panel-border); color:var(--text); border-radius:6px; padding:7px 10px; font-size:13px;}
-  #live-log{max-height:230px; overflow-y:auto; font-size:12.5px; font-family:Consolas,monospace;}
-  #live-log .row{display:grid; grid-template-columns:80px 90px 1fr 70px 90px; gap:10px; padding:5px 4px; border-bottom:1px solid var(--panel-border);}
-  #live-log .row.attack{color:#ff8080;}
-  #live-log .row.clean{color:var(--real);}
-  #live-log .head{color:var(--muted); font-weight:700; text-transform:uppercase; font-size:10.5px;}
+  .ctl-bar > *{max-width:100%; min-width:0;}
+  select.ctl{max-width:100%; min-width:0; background:var(--inset); border:1px solid var(--rule); color:var(--ink); border-radius:3px; padding:5px 9px; font-size:12px; font-family:var(--font-ui);}
 
-  /* ---- Spatial statistics (Moran's I / LISA) ---- */
-  .moran-row{display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin:2px 0 14px;}
-  .moran-stat{
-    display:flex; align-items:baseline; gap:8px; background:#0d1622; border:1px solid var(--panel-border);
-    border-radius:8px; padding:9px 16px;
-  }
-  .moran-stat .v{font-size:19px; font-weight:800; color:#4da3ff;}
-  .moran-stat .l{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em;}
-  .lisa-legend{display:flex; gap:12px; flex-wrap:wrap; font-size:11.5px; color:var(--muted);}
-  .lisa-legend span{display:inline-flex; align-items:center; gap:5px;}
-  .lisa-legend .ring{width:11px; height:11px; border-radius:50%; border:2.5px solid; display:inline-block;}
-  .ring.hh{border-color:#ff3b3b;} .ring.ll{border-color:#4da3ff;} .ring.outlier{border-color:#b56bff;}
+  /* ---- Charts ---- */
+  #map,#live-map,#fi-chart{background:var(--panel-2);}
+  .grid2{display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr); gap:14px;}
+  .grid2 > div{min-width:0;}
+  @media (max-width:900px){ .grid2{grid-template-columns:1fr;} }
+  #fi-chart{width:100%; height:100%;}
+  .modebar-container{background:transparent !important;}
+  .modebar-group{background:transparent !important;}
+  .modebar-btn path{fill:var(--muted) !important;}
+  .modebar-btn:hover path{fill:var(--ink) !important;}
+  .modebar-btn.active path{fill:var(--blue) !important;}
+  /* Legends that make the chart self-evident (replace the explanatory paragraphs). */
+  .lisa-legend,.map-legend{display:flex; gap:4px 14px; flex-wrap:wrap; align-items:center; font-size:11px; color:var(--ink-2); margin:0 0 5px;}
+  .lisa-legend span,.map-legend > span{display:inline-flex; align-items:center; gap:5px;}
+  .lisa-legend .ring{width:10px; height:10px; border-radius:50%; border:2.5px solid; display:inline-block;}
+  .ring.hh{border-color:var(--red);} .ring.ll{border-color:var(--blue);} .ring.outlier{border-color:var(--ink);}
+  .dia{display:inline-block; width:8px; height:8px; background:var(--red); transform:rotate(45deg); margin:0 1px;}
+  .star{color:var(--blue); font-size:13px; line-height:1;}
+  .rank-badge{font-family:var(--font-mono); font-weight:700; color:var(--ink-2); font-size:10.5px;}
+  .map-legend{margin:5px 0 0;}
+
+  /* ---- Tables: labels in the UI face, figures in mono + tabular ---- */
+  table{width:100%; border-collapse:collapse; font-size:13px; font-family:var(--font-ui);}
+  th,td{padding:6px 10px; text-align:right; border-bottom:1px solid var(--rule-soft);}
+  td{font-family:var(--font-mono); font-variant-numeric:tabular-nums; color:var(--ink); font-weight:600;}
+  th:first-child,td:first-child{text-align:left; color:var(--ink-2);}
+  td:first-child{font-family:var(--font-ui); font-weight:400;}
+  thead th,tr:first-child th{color:var(--muted); font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em;}
+  .cm-table td,.cm-table th{text-align:center;}
+  .cm-table td{font-size:17px; font-weight:700;}
+  .cm-table td:first-child{font-family:var(--font-mono); font-size:13px;}
+  .cm-table .diag{background:var(--diag); font-weight:700;}
+  .cm-table .offdiag{background:var(--offdiag);}
+  .stat-row{display:flex; gap:6px 30px; flex-wrap:wrap; padding-top:7px; margin:0 0 4px; border-top:1px solid var(--rule);}
+  footer{flex:none; padding:5px clamp(14px,3vw,32px); color:var(--muted); font-size:11px; border-top:1px solid var(--rule); background:var(--panel); display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+
+  /* ---- Live log ---- */
+  #live-log{flex:1 1 auto; min-height:0; overflow-y:auto; font-size:12.5px; font-family:var(--font-mono); font-variant-numeric:tabular-nums; background:var(--panel-2); border:1px solid var(--rule-soft); padding:0 6px;}
+  #live-log .row{display:grid; grid-template-columns:76px 96px 1fr 66px 84px; gap:10px; padding:5px 4px; border-bottom:1px solid var(--rule-soft); cursor:pointer; align-items:center;}
+  #live-log .row > div{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #live-log .row > div:nth-child(4),#live-log .row > div:nth-child(5){text-align:right; font-weight:700;}
+  #live-log .row.attack{color:var(--red);}
+  #live-log .row.clean{color:var(--ink-2);}
+  #live-log .row.head{cursor:default;}
+  #live-log .head{color:var(--muted); font-weight:700; text-transform:uppercase; font-size:10px; letter-spacing:.06em;}
+  #live-log .head > div:nth-child(4),#live-log .head > div:nth-child(5){text-align:right;}
+  #live-log .row:hover:not(.head){background:var(--wash);}
 
   /* ---- SHAP explanation panel ---- */
-  #live-log .row{cursor:pointer;}
-  #live-log .row.head{cursor:default;}
-  #live-log .row:hover:not(.head){background:#152234;}
-  #explain-panel{
-    background:#0d1622; border:1px solid var(--panel-border); border-radius:10px;
-    padding:14px 18px; margin-top:14px; font-size:13px;
-  }
-  #explain-panel .ph{color:var(--muted); font-size:13px;}
-  #explain-summary{font-weight:700; margin-bottom:10px; font-size:13.5px;}
-  .shap-bar-row{display:grid; grid-template-columns:150px 1fr 60px; align-items:center; gap:10px; margin:6px 0;}
-  .shap-bar-row .fname{font-size:12px; color:var(--text); text-align:right; font-family:Consolas,monospace;}
-  .shap-bar-track{background:#182636; border-radius:4px; height:16px; position:relative; overflow:hidden;}
-  .shap-bar-fill{position:absolute; top:0; bottom:0; border-radius:4px;}
-  .shap-bar-fill.attack{background:#ff3b3b; right:50%;}
-  .shap-bar-fill.clean{background:#3fb8af; left:50%;}
-  .shap-bar-track .mid{position:absolute; left:50%; top:0; bottom:0; width:1px; background:#4a5a6e;}
-  .shap-val{font-size:11.5px; color:var(--muted); font-family:Consolas,monospace;}
+  #explain-panel{flex:1 1 auto; min-height:0; overflow-y:auto; background:var(--blue-tint); border-top:3px solid var(--blue); padding:8px 14px 9px; font-size:12.5px;}
+  #explain-panel .ph{color:var(--ink-2); font-size:12.5px;}
+  #explain-summary{font-weight:700; margin-bottom:8px; font-size:12.5px;}
+  .shap-bar-row{display:grid; grid-template-columns:150px 1fr 60px; align-items:center; gap:10px; margin:5px 0;}
+  .shap-bar-row .fname{font-size:11.5px; color:var(--ink); text-align:right; font-family:var(--font-mono);}
+  .shap-bar-track{background:var(--inset); height:15px; position:relative; overflow:hidden; border:1px solid var(--rule-soft);}
+  .shap-bar-fill{position:absolute; top:0; bottom:0;}
+  .shap-bar-fill.attack{background:var(--red); right:50%;}
+  .shap-bar-fill.clean{background:var(--blue); left:50%;}
+  .shap-bar-track .mid{position:absolute; left:50%; top:0; bottom:0; width:1px; background:var(--muted);}
+  .shap-val{font-size:11.5px; color:var(--muted); font-family:var(--font-mono);}
   #explain-btn{margin-top:6px;}
 </style>
 </head>
 <body>
 
 <header>
-  <h1>SyncGuard — Detector Evidence &amp; Spatial Layer</h1>
-  <p class="sub">Interactive companion to the pitch deck. GNSS spoofing/jamming/meaconing detection for 4G/5G base-station timing infrastructure, evaluated on the real Jammertest 2024 (Zenodo) dataset, mapped onto real ASEAN telecom tower locations.</p>
-  <div class="legend">
-    <div class="badge real"><span class="dot"></span>REAL — Jammertest 2024 GNSS recordings, 136 Telkomsel tower sites (Kubu Raya / Pontianak, Indonesia), RandomForest detector evidence</div>
-    <div class="badge sim"><span class="dot"></span>SIMULATED — offline map: spoofing epicenter, distance-decay severity, spread over time, priority ranking</div>
-    <div class="badge live"><span class="dot"></span>LIVE — replay feed: real detector scoring per event, real distance-weighted correlation; only the tower each event is attributed to is SIMULATED (round-robin, no per-tower dataset exists)</div>
+  <div class="hdr">
+    <h1>SyncGuard — Detector Evidence &amp; Spatial Layer <span class="has-pop"><button type="button" class="info" aria-label="About this page: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Interactive companion to the pitch deck. GNSS spoofing/jamming/meaconing detection for 4G/5G base-station timing infrastructure, evaluated on the real Jammertest 2024 (Zenodo) dataset, mapped onto real ASEAN telecom tower locations.</span></span></span></span></h1>
+    <div class="hdr-right">
+      <div class="legend">
+        <span class="legend-key">Data provenance <span class="has-pop"><button type="button" class="info" aria-label="Data provenance: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">hover a badge for detail — each tab restates only what differs</span></span></span></span></span>
+        <span class="tag real has-pop"><span>REAL</span><button type="button" class="info" aria-label="REAL: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Jammertest 2024 GNSS recordings, 136 Telkomsel tower sites (Kubu Raya / Pontianak, Indonesia), RandomForest detector evidence</span></span></span></span>
+        <span class="tag sim has-pop"><span>SIMULATED</span><button type="button" class="info" aria-label="SIMULATED: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Offline map: spoofing epicenter, distance-decay severity, spread over time, priority ranking — documented simulation</span></span></span></span>
+        <span class="tag live has-pop"><span>LIVE</span><button type="button" class="info" aria-label="LIVE: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Replay feed: real detector scoring per event, real distance-weighted correlation; only the tower each event is attributed to is SIMULATED (round-robin, no per-tower dataset exists)</span></span></span></span>
+      </div>
+      <button type="button" id="theme-toggle" class="theme-btn" aria-label="Switch between dark and light theme">☾ Dark</button>
+    </div>
   </div>
 </header>
 
-<main>
+<section class="kpi-strip" aria-label="Headline numbers">
+  <div class="kpi-group real">
+    <div class="kpi-eyebrow">Real · detector, held-out</div>
+    <div class="kpi-tiles" id="kpi-static"></div>
+  </div>
+  <div class="kpi-group live">
+    <div class="kpi-eyebrow">Live · this session</div>
+    <div class="kpi-tiles">
+      <div class="stat"><div class="v" id="moran-i">—</div><div class="l">Global Moran's I <span class="has-pop"><button type="button" class="info" aria-label="Global Moran&#x27;s I: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-label">Spatial statistics — global Moran's I &amp; Local Moran's I (LISA)</span><span class="pop-p">Established spatial-statistics methods (Moran, 1950; Anselin, 1995), via PySAL's <code>esda</code>/<code>libpysal</code> — not a custom metric. <strong>Real</strong>: the k-nearest-neighbor spatial weights (built from real tower geography) and the severities fed in (real <code>predict_proba</code> output). <strong>Inherited caveat</strong>: which tower each severity is attributed to is still the SIMULATED round-robin above — the statistics themselves are 100% real math applied to that input. Computed fresh from current network state, refreshed every few seconds while connected. Full methodology: <code>SPATIAL_STATISTICS.md</code>.</span></span></span></span></div><div class="s">p-value (999 perms): <span id="moran-p">—</span></div></div>
+      <div class="stat"><div class="v" id="moran-n">—</div><div class="l">towers scored / min needed</div></div>
+      <div class="stat"><div class="v" id="replay-count">0</div><div class="l">events scored this session</div></div>
+      <div class="stat"><div class="v"><span class="pill normal" id="alert-pill"><span class="dot"></span><span id="alert-pill-text">normal</span></span></div><div class="l">Alert state <span class="has-pop"><button type="button" class="info" aria-label="Alert state: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Debounced over this recording's real reading sequence — 3 consecutive above-threshold readings to alert, 5 below to clear. Not naive per-event flagging.</span></span></span></span></div></div>
+    </div>
+  </div>
+</section>
 
-  <section class="card live-zone" id="live-section">
-    <span class="zone-tag live">Live — requires the SyncGuard API running (api/main.py)</span>
-    <h2>Live replay feed</h2>
-    <p class="note">Streams <code>syncguard_features.parquet</code> row-by-row through the real, trained detector via the FastAPI service's asyncio replay loop. Each event's <strong>probability and severity are real model output</strong>, scored live, not pre-computed. Each event's <strong>tower attribution is SIMULATED</strong> (deterministic round-robin over the 136 real sites — the underlying dataset is a single receiver, so there's no real per-tower mapping to use); the <strong>correlation score is a real distance-weighted aggregate</strong> of other real towers' actual recent severities in this session, computed fresh each time — see <code>api/spatial.py</code>.</p>
+<nav class="tabs" role="tablist" aria-label="Dashboard views">
+  <button type="button" class="tab-btn live active" data-tab="live" aria-selected="true"><span class="dotc"></span>Live Operations</button>
+  <button type="button" class="tab-btn sim" data-tab="map" aria-selected="false"><span class="dotc"></span>Severity Map</button>
+  <button type="button" class="tab-btn real" data-tab="eval" aria-selected="false"><span class="dotc"></span>Detector Evidence</button>
+</nav>
 
-    <div class="api-row">
-      <label for="api-base" style="font-size:13px;color:var(--muted);font-weight:600;">API base</label>
-      <input type="text" id="api-base" value="">
-      <button class="btn" id="btn-connect">Connect</button>
-      <span class="pill pending" id="api-status"><span class="dot"></span><span id="api-status-text">not connected</span></span>
+<div class="tabwrap">
+
+  <section class="tab-panel panel-live active" id="tab-live" role="tabpanel" aria-label="Live operations">
+    <div class="ctl-bar">
+      <span class="tag live has-pop"><span>LIVE</span><button type="button" class="info" aria-label="LIVE: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Requires the SyncGuard API running (api/main.py)</span><span class="pop-label">Scope of claim</span><span class="pop-p">Streams <code>syncguard_features.parquet</code> row-by-row through the real, trained detector via the FastAPI service's asyncio replay loop. Each event's <strong>probability and severity are real model output</strong>, scored live, not pre-computed. Each event's <strong>tower attribution is SIMULATED</strong> (deterministic round-robin over the 136 real sites — the underlying dataset is a single receiver, so there's no real per-tower mapping to use); the <strong>correlation score is a real distance-weighted aggregate</strong> of other real towers' actual recent severities in this session, computed fresh each time — see <code>api/spatial.py</code>.</span></span></span></span>
+      <div class="api-row">
+        <span class="pill pending" id="api-status"><span class="dot"></span><span id="api-status-text">not connected</span></span>
+        <button type="button" class="btn conn-toggle" id="conn-toggle" aria-expanded="false" aria-controls="conn-advanced">⚙ Connection</button>
+        <span class="has-pop"><button type="button" class="info" aria-label="Connection help: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">The dashboard auto-connects to the SyncGuard API on load. If it shows "not connected": start the API from the repo root (<code>make train &amp;&amp; make serve</code>, or <code>docker compose up --build</code>), then open <b>⚙ Connection</b> and click Connect. This is the only part of the page that talks to a server — everything else is fully static/offline.</span></span></span></span>
+        <span class="conn-advanced" id="conn-advanced" hidden>
+          <label for="api-base">API base</label>
+          <input type="text" id="api-base" value="">
+          <button class="btn" id="btn-connect">Connect</button>
+        </span>
+      </div>
+      <div class="controls">
+        <label for="run-select">Scenario</label>
+        <select class="ctl" id="run-select"><option value="">(default: 2.1.1 Spoofing)</option></select>
+        <label for="speed-select">Speed</label>
+        <select class="ctl" id="speed-select">
+          <option value="5">5x</option>
+          <option value="10" selected>10x</option>
+          <option value="25">25x</option>
+          <option value="50">50x</option>
+        </select>
+        <span class="note" id="speed-hint"></span>
+        <button class="btn primary" id="btn-start" disabled>Start replay</button>
+        <button class="btn stop" id="btn-stop" disabled>Stop</button>
+      </div>
     </div>
 
-    <div class="controls">
-      <label for="run-select">Scenario</label>
-      <select class="ctl" id="run-select"><option value="">(default: 2.1.1 Spoofing)</option></select>
-      <label for="speed-select">Speed</label>
-      <select class="ctl" id="speed-select">
-        <option value="5">5x</option>
-        <option value="10" selected>10x</option>
-        <option value="25">25x</option>
-        <option value="50">50x</option>
-      </select>
-      <span class="note" id="speed-hint" style="margin:0;"></span>
-      <button class="btn primary" id="btn-start" disabled>Start replay</button>
-      <button class="btn stop" id="btn-stop" disabled>Stop</button>
-      <div class="counter"><span id="replay-count">0</span> events scored this session</div>
-      <span class="pill normal" id="alert-pill" title="Debounced over this recording's real reading sequence — 3 consecutive above-threshold readings to alert, 5 below to clear. Not naive per-event flagging.">
-        <span class="dot"></span><span id="alert-pill-text">normal</span>
-      </span>
-    </div>
-
-    <h3>Spatial statistics — global Moran's I &amp; Local Moran's I (LISA)</h3>
-    <p class="note">Established spatial-statistics methods (Moran, 1950; Anselin, 1995), via PySAL's <code>esda</code>/<code>libpysal</code> — not a custom metric. <strong>Real</strong>: the k-nearest-neighbor spatial weights (built from real tower geography) and the severities fed in (real <code>predict_proba</code> output). <strong>Inherited caveat</strong>: which tower each severity is attributed to is still the SIMULATED round-robin above — the statistics themselves are 100% real math applied to that input. Computed fresh from current network state, refreshed every few seconds while connected. Full methodology: <code>SPATIAL_STATISTICS.md</code>.</p>
-    <div class="moran-row">
-      <div class="moran-stat"><span class="v" id="moran-i">—</span><span class="l">Global Moran's I</span></div>
-      <div class="moran-stat"><span class="v" id="moran-p">—</span><span class="l">p-value (999 perms)</span></div>
-      <div class="moran-stat"><span class="v" id="moran-n">—</span><span class="l">towers scored / min needed</span></div>
+    <div class="map-col">
+      <h3 class="h3-row">Live tower map <span class="has-pop"><button type="button" class="info" aria-label="Live tower map: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Live tower map (fill = live severity; ring = significant LISA cluster/outlier; ◆ = alerting, hysteresis-confirmed)</span><span class="pop-p">A tower can show elevated (red) severity <em>without</em> a diamond — that's a single flickering reading, not yet confirmed. The diamond only appears after the debounce streak — see <code>OPERATIONAL_METRICS.md</code> for why naive per-event alerting would spam.</span></span></span></span></h3>
       <div class="lisa-legend">
         <span><i class="ring hh"></i>High-High hotspot</span>
         <span><i class="ring ll"></i>Low-Low coldspot</span>
         <span><i class="ring outlier"></i>Spatial outlier (High-Low / Low-High)</span>
+        <span><i class="dia"></i>Alerting (hysteresis-confirmed)</span>
       </div>
+      <div class="chart-fill"><div id="live-map"></div></div>
     </div>
 
-    <div class="grid2">
-      <div>
-        <h3>Live tower map (fill = live severity; ring = significant LISA cluster/outlier; ◆ = alerting, hysteresis-confirmed)</h3>
-        <p class="note" style="margin:0 0 8px;">A tower can show elevated (red) severity <em>without</em> a diamond — that's a single flickering reading, not yet confirmed. The diamond only appears after the debounce streak — see <code>OPERATIONAL_METRICS.md</code> for why naive per-event alerting would spam.</p>
-        <div id="live-map" style="width:100%;height:420px;"></div>
-      </div>
-      <div>
-        <h3>Live event log (most recent first)</h3>
+    <div class="side-col">
+      <div class="log-wrap">
+        <h3 class="h3-row">Live event log <span class="has-pop"><button type="button" class="info" aria-label="Live event log: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Most recent first.</span></span></span></span></h3>
         <div id="live-log">
           <div class="row head"><div>Time</div><div>Attack type</div><div>Tower</div><div>Severity</div><div>Correlation</div></div>
         </div>
       </div>
+      <div class="shap-wrap">
+        <h3 class="h3-row">Why was this flagged? <span class="has-pop"><button type="button" class="info" aria-label="SHAP explanation: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Click a live-map marker or an event-log row to see the top features driving <em>that specific</em> prediction (exact Tree SHAP over the shipped RandomForest — signed contribution to the attack probability, not just a ranking). At replay speeds ≤20x, every event is explained live; faster than that, live explanation is skipped to keep replay at full speed, and an <b>Explain</b> button computes it on demand instead — see <code>SHAP_EXPLAINABILITY.md</code> for why and how this tradeoff is designed.</span></span></span></span></h3>
+        <div id="explain-panel"><span class="ph">Click a map marker or log row to see why it was flagged.</span></div>
+      </div>
     </div>
-    <h3>Why was this flagged? (SHAP per-prediction explanation)</h3>
-    <p class="note">Click a live-map marker or an event-log row to see the top features driving <em>that specific</em> prediction (exact Tree SHAP over the shipped RandomForest — signed contribution to the attack probability, not just a ranking). At replay speeds ≤20x, every event is explained live; faster than that, live explanation is skipped to keep replay at full speed, and an <b>Explain</b> button computes it on demand instead — see <code>SHAP_EXPLAINABILITY.md</code> for why and how this tradeoff is designed.</p>
-    <div id="explain-panel"><span class="ph">Click a map marker or log row above to see why it was flagged.</span></div>
-
-    <p class="note">If "not connected": start the API from the repo root (<code>make train &amp;&amp; make serve</code>, or <code>docker compose up --build</code>) and click Connect. This section is the only part of the page that talks to a server — everything below is still fully static/offline.</p>
   </section>
 
-  <section class="card sim-zone" id="map-section">
-    <span class="zone-tag sim">Offline snapshot — simulated spatial layer, on real tower coordinates</span>
-    <h2>Spatial anomaly severity map (static snapshot, from build_spatial_simulation.py)</h2>
-    <p class="note">Marker <strong>positions</strong> are the 136 real Telkomsel base-station coordinates. Marker <strong>color/size (severity), the blue epicenter star, and the spread over time</strong> are a documented simulation — no public dataset of real ASEAN base-station GNSS timing under spoofing exists, so this distance-decay spread stands in for "nearby infrastructure sharing correlated timing anomalies." Severity is anchored to the real detector's own <code>predict_proba()</code> range: floor 0.430 (median proba on real held-out clean rows) to ceiling 0.993 (90th-percentile proba on real held-out attack rows) — not invented numbers.</p>
-
+  <section class="tab-panel panel-map" id="tab-map" role="tabpanel" aria-label="Severity map">
+    <div class="panel-bar">
+      <span class="tag sim has-pop"><span>SIMULATED</span><button type="button" class="info" aria-label="SIMULATED: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Offline snapshot — simulated spatial layer, on real tower coordinates</span><span class="pop-label">Spatial anomaly severity map (static snapshot, from build_spatial_simulation.py)</span><span class="pop-label">What is simulated</span><span class="pop-p">Marker <strong>positions</strong> are the 136 real Telkomsel base-station coordinates. Marker <strong>color/size (severity), the blue epicenter star, and the spread over time</strong> are a documented simulation — no public dataset of real ASEAN base-station GNSS timing under spoofing exists, so this distance-decay spread stands in for "nearby infrastructure sharing correlated timing anomalies." Severity is anchored to the real detector's own <code>predict_proba()</code> range: floor 0.430 (median proba on real held-out clean rows) to ceiling 0.993 (90th-percentile proba on real held-out attack rows) — not invented numbers.</span></span></span></span>
+      <h2>Severity map</h2>
+    </div>
     <div class="controls">
-      <label for="tslider">Illustrative time step (SIMULATED spread widening)</label>
+      <label for="tslider">Time step</label>
       <input type="range" id="tslider" min="0" max="3" step="1" value="0">
       <div class="tstep-btns" id="tbtns"></div>
-      <div class="counter"><span id="flagcount">0</span>/136 towers flagged anomalous (SIMULATED severity ≥ 0.5)</div>
+      <div class="counter"><span id="flagcount">0</span>/136 towers flagged anomalous (SIMULATED severity ≥ 0.5) <svg id="flag-sparkline" class="sparkline" width="56" height="18" viewBox="0 0 56 18" aria-label="Flagged-tower count trend across the 4 simulated time steps"></svg></div>
     </div>
-
-    <div id="map"></div>
-    <p class="note">Hover a marker for site ID, name, SIMULATED severity at the selected time step, distance from the SIMULATED epicenter, and priority rank. Blue star = SIMULATED epicenter (deterministic: real site nearest the 136-site cluster's geometric centroid). Labels = current top-5 SIMULATED priority sites.</p>
+    <div class="chart-fill"><div id="map"></div></div>
+    <div class="map-legend"><span><i class="star">★</i>Epicenter</span><span><i class="rank-badge">#1–5</i>Priority sites</span><span class="has-pop"><button type="button" class="info" aria-label="Reading this map: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Hover a marker for site ID, name, SIMULATED severity at the selected time step, distance from the SIMULATED epicenter, and priority rank. Blue star = SIMULATED epicenter (deterministic: real site nearest the 136-site cluster's geometric centroid). Labels = current top-5 SIMULATED priority sites.</span></span></span></span></div>
   </section>
 
-  <section class="card real-zone" id="evidence-section">
-    <span class="zone-tag real">Real, validated detector evidence — not simulated</span>
-    <h2>Detector evaluation (held-out Jammertest 2024 recordings)</h2>
-    <p class="note">RandomForest (300 trees, class-weight balanced), trained/tested on real GNSS receiver logs, split by recording (not by row) to avoid leakage. One dynamic + one stationary held-out recording per attack type (Jamming, Meaconing, Spoofing, Spoofing+Jamming).</p>
-
+  <section class="tab-panel panel-eval" id="tab-eval" role="tabpanel" aria-label="Detector evidence">
+    <div class="panel-bar">
+      <span class="tag real has-pop"><span>REAL</span><button type="button" class="info" aria-label="REAL: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Real, validated detector evidence — not simulated</span><span class="pop-label">Method</span><span class="pop-p">RandomForest (300 trees, class-weight balanced), trained/tested on real GNSS receiver logs, split by recording (not by row) to avoid leakage. One dynamic + one stationary held-out recording per attack type (Jamming, Meaconing, Spoofing, Spoofing+Jamming).</span></span></span></span>
+      <h2>Detector evaluation</h2>
+    </div>
     <div class="stat-row" id="headline-stats"></div>
-
-    <div class="grid2">
-      <div>
-        <h3>Confusion matrix — held-out set (rows = true, cols = predicted)</h3>
+    <div class="eval-left">
+      <div class="eval-block">
+        <h3 class="h3-row">Confusion matrix <span class="has-pop"><button type="button" class="info" aria-label="Confusion matrix: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Held-out set. Rows = true, cols = predicted.</span></span></span></span></h3>
         <table class="cm-table" id="cm-table"></table>
-        <h3>Per-attack-type recall — true attack rows only</h3>
+      </div>
+      <div class="eval-block">
+        <h3 class="h3-row">Recall by attack type <span class="has-pop"><button type="button" class="info" aria-label="Recall by attack type: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">True attack rows only.</span></span></span></span></h3>
         <table id="attack-table"></table>
       </div>
-      <div>
-        <h3>Top feature importances (RandomForest, 23 features total)</h3>
-        <div id="fi-chart"></div>
-      </div>
+    </div>
+    <div class="eval-right">
+      <h3 class="h3-row">Feature importance <span class="has-pop"><button type="button" class="info" aria-label="Feature importance: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">RandomForest, 23 features total.</span></span></span></span></h3>
+      <div class="chart-fill"><div id="fi-chart"></div></div>
     </div>
   </section>
 
-</main>
+</div>
 
 <footer>
-  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · The detector-evidence and offline-map sections below are data sourced verbatim from <code>baseline_model_report.md</code>, <code>simulated_spatial_anomaly_SIMULATED.csv</code>, and <code>spatial_layer_notes.md</code> — no live calls, work fully offline. The live-replay section above is the exception: it calls the SyncGuard API (<code>api/main.py</code>) when available and degrades to "not connected" otherwise; it never blocks the rest of the page.
+  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · <span class="has-pop"><span>Data sources &amp; offline behaviour</span><button type="button" class="info" aria-label="Data sources and offline behaviour: details" aria-expanded="false">ⓘ</button><span class="pop up" role="tooltip"><span class="pop-body"><span class="pop-p">The <b>Detector Evidence</b> and <b>Severity Map</b> tabs are data sourced verbatim from <code>baseline_model_report.md</code>, <code>simulated_spatial_anomaly_SIMULATED.csv</code>, and <code>spatial_layer_notes.md</code> — no live calls, fully offline. The <b>Live Operations</b> tab is the exception: it calls the SyncGuard API (<code>api/main.py</code>) when available and degrades to "not connected" otherwise; it never blocks the rest of the page.</span></span></span></span>
 </footer>
 
 <script>
@@ -280,11 +398,52 @@ const meanLatRad = (lats.reduce((a,b)=>a+b,0)/lats.length) * Math.PI/180;
 
 const epicenter = towers.find(t => t.id === meta.epicenter_site_id);
 
+// View-bounds only (not a data filter -- every tower stays in every trace and remains
+// hoverable/zoomable-to): distance-to-epicenter is a long tail, not cluster+outliers, so
+// even a 90th-percentile cutoff still let a couple of ~40km towers drag the box wide.
+// The 60th percentile (~23km, roughly the last epicenter-flagged severity ring) frames
+// the towers that actually carry the story; padding keeps it from feeling clipped.
+function computeViewBounds(arr, pctile){
+  const sortedDist = arr.map(t => t.dist_km).slice().sort((a,b)=>a-b);
+  const cutoff = sortedDist[Math.min(sortedDist.length-1, Math.floor(sortedDist.length*pctile))];
+  const near = arr.filter(t => t.dist_km <= cutoff);
+  const nlons = near.map(t=>t.lon), nlats = near.map(t=>t.lat);
+  const lonSpan = (Math.max(...nlons) - Math.min(...nlons)) || 0.05;
+  const latSpan = (Math.max(...nlats) - Math.min(...nlats)) || 0.05;
+  return {
+    xrange: [Math.min(...nlons) - lonSpan*0.18, Math.max(...nlons) + lonSpan*0.18],
+    yrange: [Math.min(...nlats) - latSpan*0.18, Math.max(...nlats) + latSpan*0.18],
+  };
+}
+const viewBounds = computeViewBounds(towers, 0.6);
+
 function severityColorScale(){
-  return [[0,'#FFF3C4'],[0.35,'#FFD27A'],[0.65,'#FF8A3D'],[1,'#B3221A']];
+  // Severity is a magnitude scale (not provenance), so it stays a warm amber-to-red ramp. Reads on
+  // both the dark control-room plot and the light plot: straw low end, deck red hot end for danger.
+  return [[0,'#E9D08C'],[0.35,'#DFA94A'],[0.65,'#C9722E'],[1,'#A83232']];
 }
 
+// Theme-aware Plotly palette. Re-read on every (re)render so a light/dark toggle repaints charts.
+function chartColors(){
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  return light ? {
+    paper:'#FFFFFF', grid:'#E6E1D4', axis:'#5B6472', ink:'#1B2430', muted:'#5B6472',
+    markerLine:'#1B2430', baseMarker:'#A8A292', baseMarkerLine:'#FFFFFF',
+    hoverBg:'#FFFFFF', hoverBorderNeutral:'#C7C2B4', fiBar:'#2A5C82', epicenter:'#2A5C82',
+    lisa:{1:'#A83232', 2:'#1B2430', 3:'#2A5C82', 4:'#1B2430'}, alertLine:'#FFFFFF', flagText:'#7F6129',
+  } : {
+    paper:'#0E1826', grid:'#233145', axis:'#8492A6', ink:'#E7ECF3', muted:'#8492A6',
+    markerLine:'#0B1119', baseMarker:'#43526A', baseMarkerLine:'#0B1119',
+    hoverBg:'#141F2E', hoverBorderNeutral:'#3A4B60', fiBar:'#4F9BD8', epicenter:'#5FB0EC',
+    lisa:{1:'#E85D62', 2:'#C7D2E0', 3:'#5FB0EC', 4:'#C7D2E0'}, alertLine:'#0B1119', flagText:'#E7A552',
+  };
+}
+const FONT_UI = 'DejaVu Sans, Verdana, sans-serif';
+const FONT_MONO = 'DejaVu Sans Mono, Consolas, monospace';
+let currentTimestep = 0;
+
 function buildTraces(t){
+  const c = chartColors();
   const sev = towers.map(tw => tw.sev[t]);
   const sizes = sev.map(s => 7 + 24*Math.max(0, Math.min(1,(s-meta.floor)/(meta.ceiling-meta.floor))));
   const hover = towers.map((tw,i) => (
@@ -294,7 +453,7 @@ function buildTraces(t){
     `(anchored to REAL detector proba range: floor ${meta.floor.toFixed(3)} / ceiling ${meta.ceiling.toFixed(3)})<br>` +
     `Distance from SIMULATED epicenter: ${tw.dist_km.toFixed(2)} km<br>` +
     `SIMULATED priority rank: #${tw.rank[t]}` +
-    (tw.flagged[t] ? '<br><b style="color:#FF8A3D">FLAGGED (SIMULATED)</b>' : '')
+    (tw.flagged[t] ? `<br><b style="color:${c.flagText}">FLAGGED (SIMULATED)</b>` : '')
   ));
 
   const towerTrace = {
@@ -302,50 +461,91 @@ function buildTraces(t){
     x: lons, y: lats,
     marker:{
       color: sev, colorscale: severityColorScale(), cmin: meta.floor, cmax: meta.ceiling,
-      size: sizes, line:{color:'#0A121C', width:1},
-      colorbar:{title:{text:'SIMULATED severity', font:{color:'#EAF1F7', size:11}},
-                tickfont:{color:'#94A7BA', size:10}, outlinewidth:0, len:0.85}
+      size: sizes, line:{color:c.markerLine, width:1},
+      colorbar:{title:{text:'SIMULATED severity', font:{color:c.ink, size:11, family:FONT_UI}},
+                tickfont:{color:c.muted, size:11, family:FONT_MONO}, outlinewidth:0, len:0.85}
     },
-    text: hover, hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#263647', font:{color:'#EAF1F7', size:12}},
+    text: hover, hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:c.hoverBorderNeutral, font:{color:c.ink, size:12, family:FONT_UI}},
     showlegend:false,
   };
 
   const epicenterTrace = {
     type:'scattergl', mode:'markers',
     x:[epicenter.lon], y:[epicenter.lat],
-    marker:{symbol:'star', size:22, color:'rgba(0,0,0,0)', line:{color:'#4da3ff', width:2.5}},
+    marker:{symbol:'star', size:22, color:'rgba(0,0,0,0)', line:{color:c.epicenter, width:2.5}},
     text:[`SIMULATED epicenter<br><b>${epicenter.id}</b> — ${epicenter.name}`],
-    hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#4da3ff', font:{color:'#EAF1F7', size:12}},
+    hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:c.epicenter, font:{color:c.ink, size:12, family:FONT_UI}},
     showlegend:false,
   };
 
   const top5 = towers.filter(tw => tw.rank[t] <= 5).sort((a,b)=>a.rank[t]-b.rank[t]);
+  // The top-5-by-rank towers are, by construction, almost coincident (all nearest the
+  // epicenter), so fixed clock-position labels still pile up. Instead, park each label on a
+  // ring around the cluster centroid and draw a thin leader line back to its real site — this
+  // guarantees separation no matter how tight the cluster is. Positions only; data untouched.
+  const cx = top5.reduce((a,b)=>a+b.lon,0)/top5.length;
+  const cy = top5.reduce((a,b)=>a+b.lat,0)/top5.length;
+  const spanX = Math.abs(viewBounds.xrange[1]-viewBounds.xrange[0]);
+  const R = spanX*0.12;                                  // ring radius in lon-degrees
+  const latCorr = Math.cos(meanLatRad);                  // keep the ring visually circular
+  const lab = top5.map((_, i) => {
+    const ang = -Math.PI/2 + i*(2*Math.PI/top5.length);
+    return {x: cx + R*Math.cos(ang), y: cy + R*Math.sin(ang)*latCorr};
+  });
+  const connX = [], connY = [];
+  top5.forEach((t2,i) => { connX.push(t2.lon, lab[i].x, null); connY.push(t2.lat, lab[i].y, null); });
+  const connectorTrace = {
+    type:'scattergl', mode:'lines', x: connX, y: connY,
+    line:{color:c.axis, width:1}, opacity:0.55, hoverinfo:'skip', showlegend:false,
+  };
   const labelTrace = {
     type:'scattergl', mode:'text',
-    x: top5.map(t2=>t2.lon), y: top5.map(t2=>t2.lat),
+    x: lab.map(p=>p.x), y: lab.map(p=>p.y),
     text: top5.map(t2 => `#${t2.rank[t]} ${t2.id}`),
-    textposition:'top center', textfont:{color:'#EAF1F7', size:10, family:'Calibri'},
+    textposition: lab.map(p => p.x>=cx ? 'middle right' : 'middle left'),
+    textfont:{color:c.ink, size:10.5, family:FONT_UI},
     hoverinfo:'skip', showlegend:false,
   };
 
-  return [towerTrace, epicenterTrace, labelTrace];
+  return [towerTrace, epicenterTrace, connectorTrace, labelTrace];
 }
 
-const layout = {
-  paper_bgcolor:'#0A121C', plot_bgcolor:'#0A121C',
-  font:{color:'#EAF1F7'},
-  margin:{l:50,r:20,t:10,b:40},
-  xaxis:{title:'Longitude', gridcolor:'#1c2a3a', zerolinecolor:'#1c2a3a', color:'#94A7BA'},
-  yaxis:{title:'Latitude', gridcolor:'#1c2a3a', zerolinecolor:'#1c2a3a', color:'#94A7BA',
-         scaleanchor:'x', scaleratio: 1/Math.cos(meanLatRad)},
-  hovermode:'closest',
-};
+function severityLayout(){
+  const c = chartColors();
+  return {
+    paper_bgcolor:c.paper, plot_bgcolor:c.paper,
+    font:{color:c.ink, family:FONT_UI},
+    margin:{l:50,r:20,t:10,b:40},
+    xaxis:{title:'Longitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
+           range: viewBounds.xrange, autorange:false},
+    yaxis:{title:'Latitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
+           scaleanchor:'x', scaleratio: 1/Math.cos(meanLatRad),
+           range: viewBounds.yrange, autorange:false},
+    hovermode:'closest',
+  };
+}
 
-Plotly.newPlot('map', buildTraces(0), layout, {displayModeBar:true, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
+Plotly.newPlot('map', buildTraces(0), severityLayout(), {displayModeBar:true, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
+
+// Sparkline over meta.flagged_counts -- real data already loaded statically at page load
+// (the 4 offline simulation snapshots), not SSE-derived, so this stays outside the live
+// codepath entirely. Dot marks the currently-selected time step.
+function renderSparkline(values, activeIdx){
+  const w = 56, h = 18, pad = 3;
+  const max = Math.max(...values, 1);
+  const step = values.length > 1 ? (w - pad*2) / (values.length - 1) : 0;
+  const pts = values.map((v,i) => [pad + i*step, h - pad - (v/max)*(h-pad*2)]);
+  const line = pts.map(p => p.join(',')).join(' ');
+  const dot = pts[activeIdx];
+  return `<polyline points="${line}" fill="none" style="stroke:var(--sim);stroke-width:1.5"/>` +
+         `<circle cx="${dot[0]}" cy="${dot[1]}" r="2.5" style="fill:var(--sim)"/>`;
+}
 
 function renderTimestep(t){
-  Plotly.react('map', buildTraces(t), layout, {displayModeBar:true, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
+  currentTimestep = t;
+  Plotly.react('map', buildTraces(t), severityLayout(), {displayModeBar:true, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
   document.getElementById('flagcount').textContent = meta.flagged_counts[t];
+  document.getElementById('flag-sparkline').innerHTML = renderSparkline(meta.flagged_counts, t);
   document.getElementById('tslider').value = t;
   document.querySelectorAll('.tstep-btns button').forEach(b => {
     b.classList.toggle('active', Number(b.dataset.t) === t);
@@ -367,14 +567,15 @@ renderTimestep(0);
 const det = DATA.detector;
 const ho = det.held_out;
 
-document.getElementById('headline-stats').innerHTML = `
-  <div class="stat"><div class="v">${(ho.accuracy*100).toFixed(1)}%</div><div class="l">Accuracy</div></div>
-  <div class="stat"><div class="v">${det.roc_auc.toFixed(3)}</div><div class="l">ROC-AUC</div></div>
-  <div class="stat"><div class="v">${det.pr_auc.toFixed(3)}</div><div class="l">PR-AUC</div></div>
-  <div class="stat"><div class="v">${(ho.attack_recall*100).toFixed(1)}%</div><div class="l">Attack recall</div></div>
-  <div class="stat"><div class="v">${(ho.attack_precision*100).toFixed(1)}%</div><div class="l">Attack precision</div></div>
-  <div class="stat"><div class="v">${ho.clean_support + ho.attack_support}</div><div class="l">Held-out rows</div></div>
-`;
+const statTile = (v, l, cls) => `<div class="stat${cls ? ' ' + cls : ''}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+document.getElementById('kpi-static').innerHTML =
+  statTile((ho.attack_recall*100).toFixed(1) + '%', 'Attack recall', 'hero') +
+  statTile((ho.accuracy*100).toFixed(1) + '%', 'Accuracy');
+document.getElementById('headline-stats').innerHTML =
+  statTile(det.roc_auc.toFixed(3), 'ROC-AUC') +
+  statTile(det.pr_auc.toFixed(3), 'PR-AUC') +
+  statTile((ho.attack_precision*100).toFixed(1) + '%', 'Attack precision') +
+  statTile(ho.clean_support + ho.attack_support, 'Held-out rows');
 
 const cm = det.confusion_matrix;
 document.getElementById('cm-table').innerHTML = `
@@ -390,17 +591,24 @@ document.getElementById('attack-table').innerHTML =
   `<tr><th>Attack type</th><th>n rows</th><th>Recall</th></tr>` + attackRows;
 
 const fi = det.feature_importances.slice(0, 12).slice().reverse();
-Plotly.newPlot('fi-chart', [{
-  type:'bar', orientation:'h',
-  x: fi.map(f=>f.importance), y: fi.map(f=>f.feature),
-  marker:{color:'#3fb8af'},
-  hovertemplate:'%{y}: %{x:.4f}<extra></extra>',
-}], {
-  paper_bgcolor:'#0A121C', plot_bgcolor:'#0A121C', font:{color:'#EAF1F7', size:11.5},
-  margin:{l:150,r:20,t:6,b:36},
-  xaxis:{title:'Importance', gridcolor:'#1c2a3a', color:'#94A7BA'},
-  yaxis:{color:'#EAF1F7'},
-}, {displayModeBar:false, responsive:true});
+function renderFI(){
+  const c = chartColors();
+  Plotly.react('fi-chart', [{
+    type:'bar', orientation:'h',
+    x: fi.map(f=>f.importance), y: fi.map(f=>f.feature),
+    marker:{color:c.fiBar},
+    hovertemplate:'%{y}: %{x:.4f}<extra></extra>',
+  }], {
+    paper_bgcolor:c.paper, plot_bgcolor:c.paper, font:{color:c.ink, size:11.5, family:FONT_UI},
+    margin:{l:150,r:20,t:6,b:36},
+    xaxis:{title:'Importance', gridcolor:c.grid, color:c.axis},
+    yaxis:{color:c.ink, tickfont:{family:FONT_MONO, size:11}},
+  }, {displayModeBar:false, responsive:true});
+}
+renderFI();
+
+// Repaint the static/offline charts when the theme toggles (live map handles itself below).
+document.addEventListener('themechange', () => { renderTimestep(currentTimestep); renderFI(); });
 </script>
 
 <script>
@@ -409,7 +617,9 @@ Plotly.newPlot('fi-chart', [{
   const $ = (id) => document.getElementById(id);
   const defaultBase = window.location.protocol.startsWith('http') ? '' : 'http://localhost:8000';
   const apiBaseInput = $('api-base');
-  apiBaseInput.value = localStorage.getItem('syncguard_api_base') ?? defaultBase;
+  let savedBase = null;
+  try{ savedBase = localStorage.getItem('syncguard_api_base'); }catch(e){}
+  apiBaseInput.value = savedBase ?? defaultBase;
 
   const statusPill = $('api-status'), statusText = $('api-status-text');
   const btnConnect = $('btn-connect'), btnStart = $('btn-start'), btnStop = $('btn-stop');
@@ -426,7 +636,8 @@ Plotly.newPlot('fi-chart', [{
   const moranIEl = $('moran-i'), moranPEl = $('moran-p'), moranNEl = $('moran-n');
   const speedHintEl = $('speed-hint'), explainPanel = $('explain-panel');
   const alertPillEl = $('alert-pill'), alertPillTextEl = $('alert-pill-text');
-  const LISA_RING_COLOR = {1:'#ff3b3b', 2:'#b56bff', 3:'#4da3ff', 4:'#b56bff'}; // HH,LH,LL,HL
+  // HH=hot, LL=cold, LH/HL=outlier. Ring colors come from chartColors().lisa so they stay legible
+  // on both the dark control-room plot and the light plot.
   const LIVE_EXPLAIN_MAX_SPEED = 20; // must match api/replay.py's LIVE_EXPLAIN_MAX_SPEED
 
   function base(){ return apiBaseInput.value.replace(/\/$/, ''); }
@@ -436,9 +647,10 @@ Plotly.newPlot('fi-chart', [{
   }
 
   function renderLiveMap(){
+    const c = chartColors();
     const base = allTowers.length ? {
       type:'scattergl', mode:'markers', x: allTowers.map(t=>t.long ?? t.lon), y: allTowers.map(t=>t.lat),
-      marker:{color:'#26384a', size:6, line:{color:'#0A121C', width:0.5}},
+      marker:{color:c.baseMarker, size:6, line:{color:c.baseMarkerLine, width:0.5}},
       hoverinfo:'skip', showlegend:false,
     } : null;
     const active = [...liveSeverity.values()];
@@ -447,11 +659,14 @@ Plotly.newPlot('fi-chart', [{
       customdata: active.map(t=>t.site_id),
       marker:{
         color: active.map(t=>t.severity), colorscale: severityColorScale(), cmin:0, cmax:1,
-        size: active.map(t=>10+22*t.severity), line:{color:'#0A121C', width:1},
-        colorbar:{title:{text:'Live severity', font:{color:'#EAF1F7', size:11}}, tickfont:{color:'#94A7BA', size:10}, outlinewidth:0, len:0.85},
+        // Smaller size range + explicit full opacity + a slightly heavier outline keep
+        // individual towers distinguishable when several sit close together in the
+        // dense part of the cluster, instead of overlapping into one blob.
+        size: active.map(t=>8+14*t.severity), opacity:1, line:{color:c.markerLine, width:1.2},
+        colorbar:{title:{text:'Live severity', font:{color:c.ink, size:11, family:FONT_UI}}, tickfont:{color:c.muted, size:11, family:FONT_MONO}, outlinewidth:0, len:0.85},
       },
       text: active.map(t => `<b>${t.site_id}</b> — ${t.name}<br>Live severity: <b>${t.severity.toFixed(3)}</b><br>Correlation (real, distance-weighted): ${t.correlation.toFixed(3)}<br><i>Tower attribution SIMULATED (round-robin)</i><br><i>Click to see why (SHAP)</i>`),
-      hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#1f5f8f', font:{color:'#EAF1F7', size:12}},
+      hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#2F6E44', font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     };
     const lisaSig = active.filter(t => lisaByTower.has(t.site_id) && lisaByTower.get(t.site_id).significant);
@@ -459,7 +674,7 @@ Plotly.newPlot('fi-chart', [{
       type:'scattergl', mode:'markers', x: lisaSig.map(t=>t.lon), y: lisaSig.map(t=>t.lat),
       marker:{
         symbol:'circle-open', size: lisaSig.map(t=>16+22*t.severity),
-        color: lisaSig.map(t => LISA_RING_COLOR[lisaByTower.get(t.site_id).quadrant] || '#888'),
+        color: lisaSig.map(t => c.lisa[lisaByTower.get(t.site_id).quadrant] || c.muted),
         line:{width:3},
       },
       text: lisaSig.map(t => {
@@ -467,23 +682,25 @@ Plotly.newPlot('fi-chart', [{
         return `<b>${t.site_id}</b> — ${l.label}<br>Local Moran's I p-value: ${l.p_value.toFixed(3)} (significant)<br>` +
                `Real k-NN spatial weights + real severity; see SPATIAL_STATISTICS.md`;
       }),
-      hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#b56bff', font:{color:'#EAF1F7', size:12}},
+      hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:c.ink, font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
     const alerting = active.filter(t => t.alert_state === 'alerting');
     const alertTrace = alerting.length ? {
       type:'scattergl', mode:'markers', x: alerting.map(t=>t.lon), y: alerting.map(t=>t.lat),
-      marker:{symbol:'diamond', size:9, color:'#ff8a3d', line:{color:'#0A121C', width:1}},
+      marker:{symbol:'diamond', size:11, color:'#A83232', line:{color:c.alertLine, width:1.6}},
       text: alerting.map(t => `<b>${t.site_id}</b> — ALERTING (hysteresis-confirmed)<br>Debounced over this recording's real reading sequence -- not a single flickering event.`),
-      hoverinfo:'text', hoverlabel:{bgcolor:'#111c2b', bordercolor:'#ff8a3d', font:{color:'#EAF1F7', size:12}},
+      hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#A83232', font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
     const traces = [base, activeTrace, lisaTrace, alertTrace].filter(Boolean);
     const liveLayout = {
-      paper_bgcolor:'#0A121C', plot_bgcolor:'#0A121C', font:{color:'#EAF1F7'},
+      paper_bgcolor:c.paper, plot_bgcolor:c.paper, font:{color:c.ink, family:FONT_UI},
       margin:{l:50,r:20,t:10,b:40},
-      xaxis:{title:'Longitude', gridcolor:'#1c2a3a', zerolinecolor:'#1c2a3a', color:'#94A7BA'},
-      yaxis:{title:'Latitude', gridcolor:'#1c2a3a', zerolinecolor:'#1c2a3a', color:'#94A7BA', scaleanchor:'x', scaleratio: 1/Math.cos(meanLatRad)},
+      xaxis:{title:'Longitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
+             range: viewBounds.xrange, autorange:false},
+      yaxis:{title:'Latitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis, scaleanchor:'x', scaleratio: 1/Math.cos(meanLatRad),
+             range: viewBounds.yrange, autorange:false},
       hovermode:'closest',
     };
     Plotly.react('live-map', traces, liveLayout, {displayModeBar:false, responsive:true});
@@ -536,7 +753,14 @@ Plotly.newPlot('fi-chart', [{
       renderExplanation(ev, ev.top_features);
       return;
     }
-    explainPanel.innerHTML = `<div id="explain-summary">Event #${eventId} — not explained live (fast replay, &gt;${LIVE_EXPLAIN_MAX_SPEED}x).</div>` +
+    // Two paths skip live SHAP for throughput reasons: replay above LIVE_EXPLAIN_MAX_SPEED,
+    // and POST /ingest batches larger than INGEST_LIVE_EXPLAIN_MAX_BATCH. Either way the
+    // explanation is computed lazily on demand -- say which one applies rather than always
+    // blaming replay speed.
+    const skipReason = ev.source === 'ingest'
+      ? 'ingested in a large batch'
+      : `fast replay, &gt;${LIVE_EXPLAIN_MAX_SPEED}x`;
+    explainPanel.innerHTML = `<div id="explain-summary">Event #${eventId} — not explained live (${skipReason}).</div>` +
       `<button class="btn primary" id="explain-btn">Explain (compute SHAP now)</button>`;
     document.getElementById('explain-btn').addEventListener('click', async () => {
       explainPanel.innerHTML = `<span class="ph">Computing SHAP explanation…</span>`;
@@ -574,7 +798,7 @@ Plotly.newPlot('fi-chart', [{
   }
 
   async function connect(){
-    localStorage.setItem('syncguard_api_base', apiBaseInput.value);
+    try{ localStorage.setItem('syncguard_api_base', apiBaseInput.value); }catch(e){}
     setStatus('pending', 'connecting…');
     try{
       const health = await fetch(base() + '/health').then(r => r.json());
@@ -603,6 +827,7 @@ Plotly.newPlot('fi-chart', [{
           event_id: e.id, attack_type: e.attack_type, severity: e.severity,
           predicted_label: e.predicted_label, top_features: e.top_features,
           tower: {site_id: e.tower_site_id}, tower_site_id: e.tower_site_id,
+          source: e.source,  // 'replay' | 'ingest' | 'api' -- picks the right skip reason in showExplanation()
         });
       });
       renderLiveMap();
@@ -674,6 +899,95 @@ Plotly.newPlot('fi-chart', [{
     const tower = liveSeverity.get(siteId);
     if(tower && tower.event_id !== undefined) showExplanation(tower.event_id);
   });
+
+  document.addEventListener('themechange', renderLiveMap);
+})();
+</script>
+<script>
+// ---------- Dashboard shell: theme toggle + tabs + fill-to-viewport resize ----------
+(function(){
+  const root = document.documentElement;
+  const toggle = document.getElementById('theme-toggle');
+
+  try{ if(localStorage.getItem('syncguard_theme') === 'light') root.setAttribute('data-theme','light'); }catch(e){}
+  function syncToggleLabel(){
+    const light = root.getAttribute('data-theme') === 'light';
+    toggle.textContent = light ? '☀ Light' : '☾ Dark';
+  }
+  syncToggleLabel();
+
+  function resizeActive(){
+    const panel = document.querySelector('.tab-panel.active');
+    if(!panel || !window.Plotly) return;
+    panel.querySelectorAll('.js-plotly-plot').forEach(d => { try{ Plotly.Plots.resize(d); }catch(e){} });
+  }
+
+  toggle.addEventListener('click', () => {
+    const light = root.getAttribute('data-theme') === 'light';
+    if(light) root.removeAttribute('data-theme'); else root.setAttribute('data-theme','light');
+    try{ localStorage.setItem('syncguard_theme', light ? 'dark' : 'light'); }catch(e){}
+    syncToggleLabel();
+    document.dispatchEvent(new Event('themechange'));
+    requestAnimationFrame(resizeActive);
+  });
+
+  function activateTab(name){
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      const on = b.dataset.tab === name;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+    // Charts plotted while their tab was hidden come up at 0px; resize once visible.
+    requestAnimationFrame(resizeActive);
+  }
+  document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => activateTab(b.dataset.tab)));
+
+  // Connection settings are tucked away — operators don't type endpoints; the page auto-connects.
+  const connToggle = document.getElementById('conn-toggle');
+  const connAdvanced = document.getElementById('conn-advanced');
+  if(connToggle && connAdvanced){
+    connToggle.addEventListener('click', () => {
+      const open = connAdvanced.hasAttribute('hidden');
+      if(open) connAdvanced.removeAttribute('hidden'); else connAdvanced.setAttribute('hidden','');
+      connToggle.setAttribute('aria-expanded', String(open));
+    });
+  }
+
+  window.addEventListener('resize', resizeActive);
+  window.addEventListener('load', () => requestAnimationFrame(resizeActive));
+  requestAnimationFrame(resizeActive);
+})();
+</script>
+<script>
+// UI-only: hover is pure CSS; this adds tap/keyboard toggle, Esc-to-close, and keeps each popover on-screen.
+(function(){
+  const hosts = () => document.querySelectorAll('.has-pop');
+  const close = h => { h.classList.remove('open'); const b = h.querySelector(':scope > .info'); if (b) b.setAttribute('aria-expanded', 'false'); };
+  function place(host){
+    const pop = host.querySelector(':scope > .pop'); if (!pop) return;
+    pop.style.left = '0px';
+    const keep = [pop.style.display, pop.style.visibility];
+    pop.style.display = 'block'; pop.style.visibility = 'hidden';
+    const vw = document.documentElement.clientWidth;
+    const r = pop.getBoundingClientRect(); let shift = 0;
+    if (r.right > vw - 8) shift = vw - 8 - r.right;
+    if (r.left + shift < 8) shift = 8 - r.left;
+    pop.style.left = shift + 'px';
+    pop.style.display = keep[0]; pop.style.visibility = keep[1];
+  }
+  document.addEventListener('mouseover', e => {
+    const h = e.target.closest && e.target.closest('.has-pop');
+    if (h && !h.contains(e.relatedTarget)) place(h);
+  });
+  document.addEventListener('click', e => {
+    if (e.target.closest && e.target.closest('.pop')) return;
+    const btn = e.target.closest && e.target.closest('.info');
+    const host = btn ? btn.closest('.has-pop') : null;
+    hosts().forEach(h => { if (h !== host && h.classList.contains('open')) close(h); });
+    if (host) { const open = host.classList.toggle('open'); btn.setAttribute('aria-expanded', String(open)); if (open) place(host); }
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hosts().forEach(close); });
 })();
 </script>
 </body>

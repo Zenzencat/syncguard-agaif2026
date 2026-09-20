@@ -8,11 +8,24 @@ truth). Fields are Optional because several are legitimately NaN for some receiv
 trained pipeline's SimpleImputer(strategy="median") handles missing values the same way it
 does for the training data.
 """
+from datetime import datetime, timezone
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# Cap on a single POST /ingest batch. Not a measured throughput limit -- it is a deliberate
+# request-size bound so one call can't pin the single-threaded scoring path indefinitely.
+# Phase 4 measures what this path actually costs; until then this number is a guardrail, not
+# a benchmark result.
+MAX_INGEST_BATCH = 500
 
 
-class TelemetryInput(BaseModel):
+class FeatureVector(BaseModel):
+    """The 23 model input features, exactly as named in the trained artifact's feature_cols.
+
+    Shared base for TelemetryInput (POST /score) and IngestObservation (POST /ingest) so both
+    entry points accept literally the same feature schema -- adding the ingestion path did not
+    introduce a second, drifting definition of what a feature vector is.
+    """
     # --- receiver PVT solution (nav_pvt.csv-derived) ---
     fixType: Optional[float] = Field(default=None, description="u-blox fix type (0=no fix .. 3=3D, 4=GNSS+dead reckoning)")
     gSpeed: Optional[float] = Field(default=None, description="Ground speed, m/s")
@@ -42,6 +55,8 @@ class TelemetryInput(BaseModel):
     agc_cnt_mean: Optional[float] = Field(default=None, ge=0, description="AGC count")
     noise_per_ms_mean: Optional[float] = Field(default=None, ge=0, description="Noise floor per millisecond")
 
+
+class TelemetryInput(FeatureVector):
     # --- optional context: not fed to the model, only used for persistence/spatial correlation ---
     receiver_id: Optional[str] = Field(default=None, description="Caller-supplied receiver/site identifier, for logging only")
     tower_site_id: Optional[str] = Field(default=None, description="Real Telkomsel site_id (see spatial_raw tower CSV) if the caller knows which tower this reading is from -- enables live spatial correlation for this event. Omit if unknown.")
@@ -106,3 +121,59 @@ class AutocorrelationResponse(BaseModel):
     global_expected_i: Optional[float] = Field(default=None, description="Expected I under spatial randomness, ~ -1/(n-1)")
     reason: Optional[str] = Field(default=None, description="Why computable is False, if it is")
     per_tower: list[LisaTower] = Field(default_factory=list, description="Local Moran's I (LISA) classification per scored tower")
+
+
+# ---------------------------------------------------------------------------
+# POST /ingest -- batch ingestion of per-tower observation windows.
+# Contract (what a caller must compute edge-side, and from which raw receiver
+# observables): INGESTION_CONTRACT.md.
+# ---------------------------------------------------------------------------
+
+class IngestObservation(FeatureVector):
+    """One already-extracted observation window from one tower.
+
+    Carries the same 23 features as TelemetryInput (inherited from FeatureVector -- one
+    definition, not two), plus the two things ingestion needs that ad-hoc /score does not:
+    which tower it came from, and when it was observed. Feature extraction itself happens
+    caller-side; INGESTION_CONTRACT.md documents the exact raw-observable -> feature mapping
+    so an edge agent can reproduce extract_features.py's transformations without this service
+    having to accept raw RINEX/UBX.
+    """
+    tower_id: str = Field(description="Must be a known tower: a tower_key from GET /towers (preferred, unique), or a raw site_id. Unknown -> 422.")
+    timestamp: datetime = Field(description="Observation window time, UTC. A naive timestamp is interpreted as UTC; an offset-aware one is converted to UTC.")
+
+    @field_validator("timestamp")
+    @classmethod
+    def _to_utc(cls, v: datetime) -> datetime:
+        return v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v.astimezone(timezone.utc)
+
+
+class IngestBatch(BaseModel):
+    batch_id: Optional[str] = Field(default=None, description="Caller-supplied batch identifier, stored on each resulting event row for traceability. Not used for deduplication -- that is keyed on (tower_id, timestamp); see INGESTION_CONTRACT.md.")
+    observations: list[IngestObservation] = Field(min_length=1, max_length=MAX_INGEST_BATCH, description=f"1..{MAX_INGEST_BATCH} observation windows. An empty list is a 422.")
+
+
+class IngestResult(BaseModel):
+    tower_id: str = Field(description="The tower_key this observation resolved to (may differ from the submitted tower_id if a raw site_id was submitted)")
+    timestamp: datetime
+    event_id: Optional[int] = Field(default=None, description="Row id in scored_events. For a duplicate, the id of the ORIGINAL event -- no new row was written.")
+    probability: Optional[float] = None
+    severity: Optional[float] = None
+    predicted_label: Optional[str] = None
+    alert_state: Optional[str] = Field(default=None, description="Per-tower hysteresis state after this observation ('normal'/'alerting'). None for duplicates, and unchanged-from-previous for out-of-order observations, which are not fed to hysteresis.")
+    correlation_score: Optional[float] = None
+    duplicate: bool = Field(default=False, description="True if (tower_id, timestamp) was already ingested -- not re-scored, not re-persisted; event_id points at the original.")
+    out_of_order: bool = Field(default=False, description="True if this observation's timestamp is older than the newest already ingested for this tower. Still scored and persisted; deliberately NOT fed to per-tower hysteresis (see INGESTION_CONTRACT.md).")
+    explained: bool = Field(default=False, description="True if SHAP was computed inline. Large batches skip it for latency; GET /events/{id}/explain computes it lazily on demand.")
+
+
+class IngestResponse(BaseModel):
+    batch_id: Optional[str] = None
+    received: int = Field(description="Observations in the submitted batch")
+    scored: int = Field(description="Observations actually scored and persisted (received minus duplicates)")
+    duplicates: int
+    out_of_order: int = Field(description="Of the scored observations, how many were older than data already accepted for that tower BEFORE this batch")
+    reordered_in_batch: int = Field(description="How many observations were submitted out of ascending timestamp order relative to an earlier observation for the same tower in the same batch. Not an error: the batch is sorted by timestamp before scoring so per-tower hysteresis sees a monotonic sequence. Reported so a caller can see its feed is shuffled.")
+    alerts: int = Field(description="Of the scored observations, how many left their tower in alert_state='alerting'")
+    live_explain: bool = Field(description="Whether SHAP was computed inline for this batch (batch size <= the inline-explain limit)")
+    results: list[IngestResult]
