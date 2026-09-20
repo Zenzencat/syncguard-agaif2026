@@ -958,6 +958,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   let incidentsById = new Map();   // incident_id -> incident record from GET /incidents
   let selectedIncidentId = null;
   let incidentRefreshTimer = null;
+  let incidentLastRun = 0;
+  let renderedDetailSig = null;    // JSON of the incident the detail panel is currently showing
+  let lastIncidentsHash = null, lastPriorityHash = null, lastMapHash = null;
   // event_id -> the API's current feedback record. A cache in front of the API, never
   // a substitute for it: every panel open re-reads the server and repaints.
   const feedbackByEvent = new Map();
@@ -980,6 +983,24 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   const apiKeyInput = $('api-key');
   let authRequired = false;
   let priorityRefreshTimer = null;
+  let priorityLastRun = 0;
+  // /priority and /incidents are re-read at most once per REFRESH_THROTTLE_MS while the SSE
+  // stream is busy (leading + trailing, see schedulePriorityRefresh below).
+  const REFRESH_THROTTLE_MS = 1500;
+
+  // Cheap non-cryptographic string hash (cyrb53) -- used only to tell "the payload is
+  // byte-for-byte what we already rendered" so an unchanged refresh can skip its redraw.
+  function hashString(str){
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for(let i = 0; i < str.length; i++){
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (h2 >>> 0).toString(16) + (h1 >>> 0).toString(16) + ':' + str.length;
+  }
 
   // credentials:'include' on every call, so one code path works in both modes.
   function api(path, options){
@@ -1065,21 +1086,31 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     try{
       const response = await api('/priority');
       if(!response.ok) throw new Error(`HTTP ${response.status}`);
-      renderPriority(await response.json());
+      const text = await response.text();
+      const h = hashString(text);
+      if(h === lastPriorityHash) return; // unchanged payload -> nothing to repaint
+      lastPriorityHash = h;
+      renderPriority(JSON.parse(text));
     }catch(err){
+      lastPriorityHash = null; // an error state must be repainted over by the next good payload
       prioritySummaryEl.textContent = 'unavailable';
       priorityListEl.innerHTML = `<div class="priority-error">Could not load priorities: ${escapeHtml(err.message)}</div>`;
     }
   }
 
-  // Throttle, not debounce: during continuous replay, SSE events arrive faster than 200ms
-  // apart, so a plain debounce (clear-then-reset on every call) would perpetually push the
-  // refresh back and it would never actually fire -- "flagged towers" would stay stuck at 0
-  // for as long as the stream kept flowing. Scheduling only when nothing is already pending
-  // guarantees a refresh at least every ~200ms instead.
+  // Throttle, not debounce: during continuous replay, SSE events arrive far faster than the
+  // refresh interval, so a plain debounce (clear-then-reset on every call) would perpetually
+  // push the refresh back and it would never actually fire -- "flagged towers" would stay
+  // stuck at 0 for as long as the stream kept flowing. Scheduling only when nothing is
+  // already pending guarantees a refresh at least every REFRESH_THROTTLE_MS instead, and
+  // caps it at one per REFRESH_THROTTLE_MS: leading (fires immediately if idle for a full
+  // interval) + trailing (calls inside the interval collapse into one at its end).
   function schedulePriorityRefresh(){
     if(priorityRefreshTimer) return;
-    priorityRefreshTimer = setTimeout(() => { priorityRefreshTimer = null; refreshPriority(); }, 200);
+    const wait = Math.max(0, REFRESH_THROTTLE_MS - (Date.now() - priorityLastRun));
+    priorityRefreshTimer = setTimeout(() => {
+      priorityRefreshTimer = null; priorityLastRun = Date.now(); refreshPriority();
+    }, wait);
   }
 
   async function establishSession(){
@@ -1110,6 +1141,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       hoverinfo:'skip', showlegend:false,
     } : null;
     const active = [...liveSeverity.values()];
+    const selectedIncident = selectedIncidentId ? incidentsById.get(selectedIncidentId) : null;
+    const selectedSiteIds = selectedIncident ? new Set(selectedIncident.towers.map(t=>t.site_id)) : null;
+    const isSelectedTower = t => !!(selectedSiteIds && selectedSiteIds.has(t.site_id));
     const activeTrace = {
       type:'scattergl', mode:'markers', x: active.map(t=>t.lon), y: active.map(t=>t.lat),
       customdata: active.map(t=>t.site_id),
@@ -1117,11 +1151,13 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         color: active.map(t=>t.severity), colorscale: severityColorScale(), cmin:0, cmax:1,
         // Smaller size range + explicit full opacity + a slightly heavier outline keep
         // individual towers distinguishable when several sit close together in the
-        // dense part of the cluster, instead of overlapping into one blob.
-        size: active.map(t=>8+14*t.severity), opacity:1, line:{color:c.markerLine, width:1.2},
+        // dense part of the cluster, instead of overlapping into one blob. Towers in the
+        // selected incident are drawn larger so they're easy to hit once zoomed in.
+        size: active.map(t=>(isSelectedTower(t) ? 1.7 : 1) * (8+14*t.severity)),
+        opacity:1, line:{color:c.markerLine, width:1.2},
         colorbar:{title:{text:'Session severity', font:{color:c.ink, size:11, family:FONT_UI}}, tickfont:{color:c.muted, size:11, family:FONT_MONO}, outlinewidth:0, len:0.85},
       },
-      text: active.map(t => { const label=towerIdentity(t.site_id,t.name); return `<b>${label.title}</b> — ${label.subtitle}<br>Live severity: <b>${t.severity.toFixed(3)}</b><br>Correlation (real, distance-weighted): ${t.correlation.toFixed(3)}<br><i>Tower attribution SIMULATED (round-robin)</i><br><i>Click to see why (SHAP)</i>`; }),
+      text: active.map(t => { const label=towerIdentity(t.site_id,t.name); return `<b>${label.title}</b> — ${label.subtitle}<br>Live severity: <b>${t.severity.toFixed(3)}</b><br>Correlation (real, distance-weighted): ${t.correlation.toFixed(3)}<br><i>Tower attribution SIMULATED (round-robin)</i><br><i>Click to select its incident / see why (SHAP)</i>`; }),
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#2F6E44', font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     };
@@ -1153,33 +1189,81 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     alertPillTextEl.textContent = alerting.length ? 'alerting' : 'normal';
     const alertTrace = alerting.length ? {
       type:'scattergl', mode:'markers', x: alerting.map(t=>t.lon), y: alerting.map(t=>t.lat),
-      marker:{symbol:'diamond', size:11, color:'#A83232', line:{color:c.alertLine, width:1.6}},
-      text: alerting.map(t => `<b>${t.site_id}</b> — ALERTING (hysteresis-confirmed)<br>Debounced over this recording's real reading sequence -- not a single flickering event.`),
+      customdata: alerting.map(t=>t.site_id),
+      marker:{
+        symbol:'diamond', color:'#A83232', line:{color:c.alertLine, width:1.6},
+        size: alerting.map(t => isSelectedTower(t) ? 20 : 11),
+      },
+      text: alerting.map(t => `<b>${t.site_id}</b> — ALERTING (hysteresis-confirmed)<br>Debounced over this recording's real reading sequence -- not a single flickering event.<br><i>Click to select its incident</i>`),
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#A83232', font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
-    const selectedIncident = selectedIncidentId ? incidentsById.get(selectedIncidentId) : null;
-    const selectedSiteIds = selectedIncident ? new Set(selectedIncident.towers.map(t=>t.site_id)) : null;
-    const selectedTowers = selectedSiteIds ? active.filter(t => selectedSiteIds.has(t.site_id)) : [];
+    const selectedTowers = selectedSiteIds ? active.filter(isSelectedTower) : [];
     const selectedTrace = selectedTowers.length ? {
       type:'scattergl', mode:'markers', x: selectedTowers.map(t=>t.lon), y: selectedTowers.map(t=>t.lat),
-      marker:{symbol:'circle-open', size: 26, color:c.epicenter, line:{color:c.epicenter, width:2.5}},
+      marker:{symbol:'circle-open', size: 32, color:c.epicenter, line:{color:c.epicenter, width:2.5}},
       text: selectedTowers.map(t => `<b>${t.site_id}</b> — part of selected incident ${escapeHtml(selectedIncidentId)}`),
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:c.epicenter, font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
     const traces = [...basemapTraces(c), base, activeTrace, lisaTrace, alertTrace, selectedTrace].filter(Boolean);
+    // Zoom to the selected incident's towers (padded) so its markers are easy to see and
+    // click; otherwise the full session extent, same as before.
+    const zoomRange = selectedTowers.length ? incidentZoomRange(selectedTowers) : null;
+    // Skip the Plotly redraw when nothing that feeds it changed. During replay this runs on
+    // every SSE message; an identical redraw is pure churn and, on a WebGL scatter, competes
+    // with the user's mouse-down/up so a click can land on a marker that was just replaced.
+    const mapHash = hashString(JSON.stringify([
+      c, traces.length, basemapPlaceLabels.length, allTowers.length, zoomRange,
+      activeTrace.x, activeTrace.y, activeTrace.customdata, activeTrace.marker.color,
+      activeTrace.marker.size, activeTrace.text,
+      lisaTrace && [lisaTrace.x, lisaTrace.y, lisaTrace.marker.color, lisaTrace.marker.size],
+      alertTrace && [alertTrace.x, alertTrace.y, alertTrace.marker.size],
+      selectedTrace && [selectedTrace.x, selectedTrace.y, selectedIncidentId],
+    ]));
+    if(mapHash === lastMapHash) return;
     const liveLayout = {
       paper_bgcolor:c.paper, plot_bgcolor:c.paper, font:{color:c.ink, family:FONT_UI},
       margin:{l:50,r:20,t:10,b:40},
       xaxis:{title:'Longitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
-             range: viewBounds.xrange, autorange:false},
+             range: zoomRange ? zoomRange.xrange : viewBounds.xrange, autorange:false},
       yaxis:{title:'Latitude', gridcolor:c.grid, zerolinecolor:c.grid, color:c.axis,
-             range: viewBounds.yrange, autorange:false},
+             range: zoomRange ? zoomRange.yrange : viewBounds.yrange, autorange:false},
       hovermode:'closest',
       annotations: basemapPlaceAnnotations(c),
+      // Keeps whatever zoom/pan the user set across the constant stream of redraws; the
+      // revision only changes when the selected incident changes, which re-applies the
+      // zoomRange above. (Plotly ignores range changes made in code while uirevision is
+      // unchanged.)
+      uirevision: 'incident:' + (selectedIncidentId || 'none'),
     };
-    Plotly.react('live-map', traces, liveLayout, {displayModeBar:false, responsive:true});
+    // Remember the hash only once the draw succeeded, and never let a failed draw (Plotly can
+    // throw "axis scaling" if the pane has no size yet) escape: it would abort connect() and
+    // leave the incident queue unloaded. A failed draw clears the hash so the next update retries.
+    try{
+      Plotly.react('live-map', traces, liveLayout, {displayModeBar:false, responsive:true});
+      lastMapHash = mapHash;
+    }catch(err){
+      lastMapHash = null;
+      console.error('live map redraw failed; will retry on the next update', err);
+    }
+  }
+
+  // Bounding box of the given towers with padding, clamped to a sane minimum span so a
+  // single-tower (or very tight) incident doesn't zoom in to an unreadable sliver.
+  function incidentZoomRange(towers){
+    const lons = towers.map(t=>t.lon), lats = towers.map(t=>t.lat);
+    const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const MIN_SPAN = 0.03, PAD_FRAC = 0.35;
+    const lonSpan = Math.max(maxLon - minLon, MIN_SPAN);
+    const latSpan = Math.max(maxLat - minLat, MIN_SPAN);
+    const lonPad = lonSpan * PAD_FRAC, latPad = latSpan * PAD_FRAC;
+    const cx = (minLon + maxLon) / 2, cy = (minLat + maxLat) / 2;
+    return {
+      xrange: [cx - lonSpan/2 - lonPad, cx + lonSpan/2 + lonPad],
+      yrange: [cy - latSpan/2 - latPad, cy + latSpan/2 + latPad],
+    };
   }
 
   // ---------- Incident queue (NOC item 2) ----------
@@ -1209,32 +1293,49 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     if(!incidents.length){
       incidentQueueEl.innerHTML = `<div class="incident-empty">No incidents this session -- towers are quiet, or no alerting events have been scored yet.</div>`;
       renderIncidentDetailEmpty();
+      renderedDetailSig = null;
       return;
     }
     incidentQueueEl.innerHTML = incidents.map(incidentRowHtml).join('');
     incidentQueueEl.querySelectorAll('.incident-row').forEach(row => {
       row.addEventListener('click', () => selectIncident(row.dataset.id));
     });
-    if(selectedIncidentId) renderIncidentDetail(incidentsById.get(selectedIncidentId));
+    // Only repaint the detail panel when the selected incident itself changed -- repainting
+    // it on every queue refresh would reset the Confirm/Dismiss controls mid-interaction.
+    if(selectedIncidentId){
+      const inc = incidentsById.get(selectedIncidentId);
+      const sig = JSON.stringify(inc);
+      if(sig !== renderedDetailSig){ renderedDetailSig = sig; renderIncidentDetail(inc); }
+    } else {
+      renderedDetailSig = null;
+    }
   }
 
   async function fetchIncidents(){
     try{
-      const data = await api('/incidents').then(r => {
+      const text = await api('/incidents').then(r => {
         if(!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
+        return r.text();
       });
-      renderIncidentQueue(data.incidents || []);
+      const h = hashString(text);
+      if(h === lastIncidentsHash) return; // unchanged payload -> keep the queue/detail/map as-is
+      lastIncidentsHash = h;
+      renderIncidentQueue(JSON.parse(text).incidents || []);
       renderLiveMap(); // refresh the selected-incident highlight ring
     }catch(err){
+      lastIncidentsHash = null; // repaint over the error once a good payload arrives
       incidentQueueEl.innerHTML = `<div class="incident-error">Could not load incidents: ${escapeHtml(err.message)}</div>`;
     }
   }
 
-  // Same throttle-not-debounce reasoning as schedulePriorityRefresh() above.
+  // Same throttle-not-debounce (leading + trailing, one per REFRESH_THROTTLE_MS) reasoning
+  // as schedulePriorityRefresh() above.
   function scheduleIncidentRefresh(){
     if(incidentRefreshTimer) return;
-    incidentRefreshTimer = setTimeout(() => { incidentRefreshTimer = null; fetchIncidents(); }, 300);
+    const wait = Math.max(0, REFRESH_THROTTLE_MS - (Date.now() - incidentLastRun));
+    incidentRefreshTimer = setTimeout(() => {
+      incidentRefreshTimer = null; incidentLastRun = Date.now(); fetchIncidents();
+    }, wait);
   }
 
   function renderIncidentDetailEmpty(){
@@ -1247,7 +1348,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       row.classList.toggle('selected', row.dataset.id === id));
     renderLiveMap();
     const inc = incidentsById.get(id);
-    if(inc) renderIncidentDetail(inc);
+    if(inc){ renderedDetailSig = JSON.stringify(inc); renderIncidentDetail(inc); }
   }
 
   const NOC_CHECKLIST_HTML = `<div class="incident-checklist">
@@ -1822,15 +1923,36 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   renderLiveMap();
   connect(); // best-effort on load; harmless if nothing is listening yet
 
-  // Map marker clicks -> explain that tower's most recent event. Attached once; Plotly.react
-  // (used by every renderLiveMap() call) preserves listeners on the same div.
+  // Map marker clicks: select the incident that tower belongs to (opens its detail, zooms
+  // the map to it); a tower with no tracked incident falls back to explaining its latest
+  // event directly, same as clicking a raw-log row. Attached once; Plotly.react (used by
+  // every renderLiveMap() call, including mid-replay) preserves listeners on the same div,
+  // so this keeps working while a replay is running.
   document.getElementById('live-map').on('plotly_click', (evt) => {
     const pt = evt.points && evt.points[0];
     const siteId = pt && pt.customdata;
     if(!siteId) return;
+    const incident = incidentForTower(siteId);
+    if(incident){
+      selectIncident(incident.incident_id);
+      return;
+    }
     const tower = liveSeverity.get(siteId);
     if(tower && tower.event_id !== undefined) showExplanation(tower.event_id);
   });
+
+  function incidentForTower(siteId){
+    // A tower can belong to several incidents (same epicenter, successive alert bursts).
+    // If the incident already selected contains it, stay on that one -- otherwise clicking
+    // another tower of the incident you're looking at would jump to a different incident and
+    // re-zoom the map under the cursor.
+    const current = selectedIncidentId ? incidentsById.get(selectedIncidentId) : null;
+    if(current && current.towers.some(t => t.site_id === siteId)) return current;
+    for(const inc of incidentsById.values()){
+      if(inc.towers.some(t => t.site_id === siteId)) return inc;
+    }
+    return null;
+  }
 
   document.addEventListener('themechange', renderLiveMap);
   document.addEventListener('basemapready', renderLiveMap);
