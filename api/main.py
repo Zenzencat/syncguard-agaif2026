@@ -50,6 +50,9 @@ PRECISION_CAVEAT = (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_PATH = REPO_ROOT / "syncguard_interactive_summary.html"
+ASSET_DIR = REPO_ROOT / "assets"
+PLOTLY_PATH = ASSET_DIR / "plotly-2.35.2.min.js"
+BASEMAP_PATH = ASSET_DIR / "offline_basemap.geojson"
 
 log = configure_logging()
 
@@ -772,3 +775,19 @@ async def dashboard():
     if not DASHBOARD_PATH.exists():
         raise HTTPException(404, "syncguard_interactive_summary.html not found")
     return FileResponse(DASHBOARD_PATH)
+
+
+@app.get("/assets/plotly-2.35.2.min.js", include_in_schema=False)
+async def dashboard_plotly():
+    """Vendored Plotly build: the dashboard must render with no internet connection."""
+    if not PLOTLY_PATH.exists():
+        raise HTTPException(404, "vendored Plotly asset not found")
+    return FileResponse(PLOTLY_PATH, media_type="text/javascript")
+
+
+@app.get("/assets/offline_basemap.geojson", include_in_schema=False)
+async def dashboard_basemap():
+    """Small Natural Earth land/coastline layer for the local tower-map bounding box."""
+    if not BASEMAP_PATH.exists():
+        raise HTTPException(404, "offline basemap asset not found")
+    return FileResponse(BASEMAP_PATH, media_type="application/geo+json")

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>SyncGuard — Evaluation &amp; Spatial Layer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<script src="/assets/plotly-2.35.2.min.js" charset="utf-8"></script>
 <style>
   /* Dark control-room theme is the default (TOC wall-display look). Light theme (the original
      deck-sampled palette) is opt-in via :root[data-theme="light"]. */
@@ -463,7 +463,7 @@
 </div>
 
 <footer>
-  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · <span class="has-pop"><span>Data sources &amp; offline behaviour</span><button type="button" class="info" aria-label="Data sources and offline behaviour: details" aria-expanded="false">ⓘ</button><span class="pop up" role="tooltip"><span class="pop-body"><span class="pop-p">The <b>Detector Evidence</b> and <b>Severity Map</b> tabs are data sourced verbatim from <code>baseline_model_report.md</code>, <code>simulated_spatial_anomaly_SIMULATED.csv</code>, and <code>spatial_layer_notes.md</code> — no live calls, fully offline. The <b>Live Operations</b> tab is the exception: it calls the SyncGuard API (<code>api/main.py</code>) when available and degrades to "not connected" otherwise; it never blocks the rest of the page.</span></span></span></span>
+  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · Basemap: Natural Earth (public domain), bundled offline · <span class="has-pop"><span>Data sources &amp; offline behaviour</span><button type="button" class="info" aria-label="Data sources and offline behaviour: details" aria-expanded="false">ⓘ</button><span class="pop up" role="tooltip"><span class="pop-body"><span class="pop-p">Plotly 2.35.2 and the small Natural Earth land/coastline layer are served locally; the dashboard loads no internet resources. The <b>Detector Evidence</b> and <b>Severity Map</b> tabs are data sourced verbatim from <code>baseline_model_report.md</code>, <code>simulated_spatial_anomaly_SIMULATED.csv</code>, and <code>spatial_layer_notes.md</code>. The <b>Live Operations</b> and <b>Prioritize</b> tabs call the local SyncGuard API (<code>api/main.py</code>) when available and degrade cleanly otherwise.</span></span></span></span>
 </footer>
 
 <script>
@@ -507,12 +507,14 @@ function severityColorScale(){
 function chartColors(){
   const light = document.documentElement.getAttribute('data-theme') === 'light';
   return light ? {
-    paper:'#FFFFFF', grid:'#E6E1D4', axis:'#5B6472', ink:'#1B2430', muted:'#5B6472',
+    paper:'#FFFFFF', grid:'#D8E3E8', axis:'#5B6472', ink:'#1B2430', muted:'#5B6472',
+    mapLand:'#EEE9DC', mapCoast:'#8B9AA3',
     markerLine:'#1B2430', baseMarker:'#A8A292', baseMarkerLine:'#FFFFFF',
     hoverBg:'#FFFFFF', hoverBorderNeutral:'#C7C2B4', fiBar:'#2A5C82', epicenter:'#2A5C82',
     lisa:{1:'#A83232', 2:'#1B2430', 3:'#2A5C82', 4:'#1B2430'}, alertLine:'#FFFFFF', flagText:'#7F6129',
   } : {
     paper:'#0E1826', grid:'#233145', axis:'#8492A6', ink:'#E7ECF3', muted:'#8492A6',
+    mapLand:'#18283A', mapCoast:'#526B82',
     markerLine:'#0B1119', baseMarker:'#43526A', baseMarkerLine:'#0B1119',
     hoverBg:'#141F2E', hoverBorderNeutral:'#3A4B60', fiBar:'#4F9BD8', epicenter:'#5FB0EC',
     lisa:{1:'#E85D62', 2:'#C7D2E0', 3:'#5FB0EC', 4:'#C7D2E0'}, alertLine:'#0B1119', flagText:'#E7A552',
@@ -521,6 +523,40 @@ function chartColors(){
 const FONT_UI = 'DejaVu Sans, Verdana, sans-serif';
 const FONT_MONO = 'DejaVu Sans Mono, Consolas, monospace';
 let currentTimestep = 0;
+let offlineBasemap = null;
+
+// Same-origin, bundled GeoJSON: no tiles, fonts, scripts, or map services are fetched from
+// the internet. Natural Earth is public domain; see assets/OFFLINE_BASEMAP_ATTRIBUTION.md.
+const offlineBasemapReady = fetch('/assets/offline_basemap.geojson', {cache:'force-cache'})
+  .then(response => {
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  })
+  .then(data => {
+    offlineBasemap = data;
+    renderTimestep(currentTimestep);
+    document.dispatchEvent(new Event('basemapready'));
+  })
+  .catch(error => console.error('Bundled offline basemap failed to load:', error));
+
+function basemapTraces(c){
+  if(!offlineBasemap) return [];
+  const xs = [], ys = [];
+  const appendRing = ring => {
+    ring.forEach(point => { xs.push(point[0]); ys.push(point[1]); });
+    xs.push(null); ys.push(null);
+  };
+  offlineBasemap.features.forEach(feature => {
+    const geometry = feature.geometry || {};
+    if(geometry.type === 'Polygon') geometry.coordinates.forEach(appendRing);
+    if(geometry.type === 'MultiPolygon') geometry.coordinates.forEach(poly => poly.forEach(appendRing));
+  });
+  return [{
+    type:'scatter', mode:'lines', x:xs, y:ys, fill:'toself',
+    fillcolor:c.mapLand, line:{color:c.mapCoast, width:1.3},
+    hoverinfo:'skip', showlegend:false,
+  }];
+}
 
 function buildTraces(t){
   const c = chartColors();
@@ -587,7 +623,7 @@ function buildTraces(t){
     hoverinfo:'skip', showlegend:false,
   };
 
-  return [towerTrace, epicenterTrace, connectorTrace, labelTrace];
+  return [...basemapTraces(c), towerTrace, epicenterTrace, connectorTrace, labelTrace];
 }
 
 function severityLayout(){
@@ -605,7 +641,7 @@ function severityLayout(){
   };
 }
 
-Plotly.newPlot('map', buildTraces(0), severityLayout(), {displayModeBar:true, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
+Plotly.newPlot('map', buildTraces(0), severityLayout(), {displayModeBar:true, displaylogo:false, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
 
 // Sparkline over meta.flagged_counts -- real data already loaded statically at page load
 // (the 4 offline simulation snapshots), not SSE-derived, so this stays outside the live
@@ -623,7 +659,7 @@ function renderSparkline(values, activeIdx){
 
 function renderTimestep(t){
   currentTimestep = t;
-  Plotly.react('map', buildTraces(t), severityLayout(), {displayModeBar:true, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
+  Plotly.react('map', buildTraces(t), severityLayout(), {displayModeBar:true, displaylogo:false, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
   document.getElementById('flagcount').textContent = meta.flagged_counts[t];
   document.getElementById('flag-sparkline').innerHTML = renderSparkline(meta.flagged_counts, t);
   document.getElementById('tslider').value = t;
@@ -856,7 +892,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#A83232', font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
-    const traces = [base, activeTrace, lisaTrace, alertTrace].filter(Boolean);
+    const traces = [...basemapTraces(c), base, activeTrace, lisaTrace, alertTrace].filter(Boolean);
     const liveLayout = {
       paper_bgcolor:c.paper, plot_bgcolor:c.paper, font:{color:c.ink, family:FONT_UI},
       margin:{l:50,r:20,t:10,b:40},
@@ -1221,6 +1257,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   });
 
   document.addEventListener('themechange', renderLiveMap);
+  document.addEventListener('basemapready', renderLiveMap);
 })();
 </script>
 <script>

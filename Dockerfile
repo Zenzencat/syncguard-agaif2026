@@ -19,6 +19,7 @@ COPY spatial_raw ./spatial_raw
 # HRSL, CC BY 4.0). Only this small CSV and its attribution sidecar -- not the rest of
 # spatial_processed/ (offline plots) and never the raster.
 COPY spatial_processed/tower_exposure_HRSL.csv spatial_processed/EXPOSURE_ATTRIBUTION.md ./spatial_processed/
+COPY assets ./assets
 COPY syncguard_interactive_summary.html ./
 
 # Baked into the image at build time -- models/model.joblib (+ model_baseline.joblib) and

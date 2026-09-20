@@ -219,7 +219,8 @@ def test_health_is_exempt_and_advertises_auth(auth_client):
 
 
 def test_dashboard_and_docs_are_exempt(auth_client):
-    for path in ("/dashboard", "/docs", "/openapi.json"):
+    for path in ("/dashboard", "/assets/plotly-2.35.2.min.js",
+                 "/assets/offline_basemap.geojson", "/docs", "/openapi.json"):
         assert auth_client.get(path).status_code == 200, f"{path} should be exempt"
 
 

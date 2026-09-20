@@ -89,3 +89,21 @@ def test_dashboard_is_served(client):
     r = client.get("/dashboard")
     assert r.status_code == 200
     assert "SyncGuard" in r.text
+
+
+def test_dashboard_assets_are_local_and_served(client):
+    dashboard = client.get("/dashboard").text
+    assert 'src="/assets/plotly-2.35.2.min.js"' in dashboard
+    assert "https://cdn.plot.ly" not in dashboard
+
+    plotly = client.get("/assets/plotly-2.35.2.min.js")
+    assert plotly.status_code == 200
+    assert "plotly.js v2.35.2" in plotly.text[:200]
+    assert "Licensed under the MIT license" in plotly.text[:300]
+
+    basemap = client.get("/assets/offline_basemap.geojson")
+    assert basemap.status_code == 200
+    body = basemap.json()
+    assert body["type"] == "FeatureCollection"
+    assert body["attribution"] == "Natural Earth, public domain"
+    assert body["features"], "the offline land/coastline layer must not be empty"

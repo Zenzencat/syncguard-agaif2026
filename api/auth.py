@@ -91,7 +91,8 @@ import secrets
 import threading
 import time
 
-# Routes that never require a key. Matched exactly, plus a prefix rule for the docs assets.
+# Routes that never require a key. Dashboard assets are public because the unauthenticated
+# dashboard shell must load them before it can exchange an API key for its HttpOnly session.
 EXEMPT_PATHS = frozenset({
     "/health",
     "/",
@@ -102,7 +103,7 @@ EXEMPT_PATHS = frozenset({
     "/openapi.json",
     "/auth/session",
 })
-EXEMPT_PREFIXES = ("/docs/",)
+EXEMPT_PREFIXES = ("/docs/", "/assets/")
 
 API_KEY_HEADER = "X-API-Key"
 SESSION_COOKIE = "sg_session"
