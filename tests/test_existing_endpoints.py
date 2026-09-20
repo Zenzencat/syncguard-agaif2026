@@ -95,6 +95,9 @@ def test_dashboard_assets_are_local_and_served(client):
     dashboard = client.get("/dashboard").text
     assert 'src="/assets/plotly-2.35.2.min.js"' in dashboard
     assert "https://cdn.plot.ly" not in dashboard
+    assert "REPLAY - recorded receiver logs, tower attribution SIMULATED" in dashboard
+    assert "Highest simulated severity" in dashboard
+    assert "Pontianak" in dashboard
 
     plotly = client.get("/assets/plotly-2.35.2.min.js")
     assert plotly.status_code == 200

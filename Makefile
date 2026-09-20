@@ -1,4 +1,4 @@
-.PHONY: setup setup-dev test train train-baseline train-improved serve replay-demo ingest-demo baseline package verify-package clean
+.PHONY: setup setup-dev test train train-baseline train-improved serve replay-demo ingest-demo baseline package verify-package reset-demo-db clean
 
 PY ?= python
 
@@ -45,6 +45,11 @@ package:
 
 verify-package:
 	$(PY) make_source_zip.py --verify
+
+# Delete only the local demo SQLite database and its journal/WAL companions. This is
+# intentionally separate from clean. Stop the API first; never run during a live demo.
+reset-demo-db:
+	$(PY) -c "from pathlib import Path; [p.unlink() for p in Path('data').glob('syncguard.db*') if p.is_file()]"
 
 clean:
 	rm -rf models data/*.db*

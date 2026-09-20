@@ -35,6 +35,7 @@ from api.auth import ApiKeyAuth, SESSION_COOKIE, API_KEY_HEADER
 from api.observability import (METRICS, REQUEST_ID_HEADER, configure_logging,
                                new_request_id, request_id_var)
 from api.plausibility import FeatureBaseline, BaselineUnavailable, PSI_MINOR, PSI_MAJOR
+from api.evaluation import compute_evaluation
 
 # Attached verbatim to every /feedback/summary response. The numbers are real, but the
 # population they describe is chosen by analysts, not sampled -- so they are not an estimate
@@ -53,6 +54,7 @@ DASHBOARD_PATH = REPO_ROOT / "syncguard_interactive_summary.html"
 ASSET_DIR = REPO_ROOT / "assets"
 PLOTLY_PATH = ASSET_DIR / "plotly-2.35.2.min.js"
 BASEMAP_PATH = ASSET_DIR / "offline_basemap.geojson"
+EVALUATION_DATASET_PATH = REPO_ROOT / "processed" / "syncguard_features.parquet"
 
 log = configure_logging()
 
@@ -104,6 +106,7 @@ async def lifespan(app: FastAPI):
 
     ms = app.state.model_service
     if ms is not None:
+        app.state.evaluation = compute_evaluation(ms, EVALUATION_DATASET_PATH)
         METRICS.set_gauge("syncguard_model_info", 1, {
             "model_tag": ms.model_tag,
             "model_version": ms.model_version,
@@ -742,6 +745,14 @@ async def replay_status():
     if app.state.replay_manager is None:
         return {"status": "unavailable", "reason": "no trained model loaded"}
     return app.state.replay_manager.status
+
+
+@app.get("/evaluation")
+async def evaluation():
+    """Held-out evidence recomputed from the exact shipped artifact; never retrains."""
+    if app.state.model_service is None:
+        raise HTTPException(503, "No trained model loaded.")
+    return app.state.evaluation
 
 
 @app.get("/stream/events")

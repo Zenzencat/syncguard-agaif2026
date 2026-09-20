@@ -225,7 +225,7 @@ def test_dashboard_and_docs_are_exempt(auth_client):
 
 
 @pytest.mark.parametrize("path", [
-    "/towers", "/events?limit=1", "/events/map", "/priority", "/metrics", "/drift",
+    "/towers", "/events?limit=1", "/events/map", "/priority", "/evaluation", "/metrics", "/drift",
     "/replay/runs", "/replay/status", "/feedback/summary", "/feedback/export",
     "/spatial/autocorrelation",
 ])
