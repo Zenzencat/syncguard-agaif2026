@@ -130,6 +130,28 @@
   .eval-block{flex:0 0 auto; display:flex; flex-direction:column; gap:6px;}
   .eval-right{grid-column:2; grid-row:3; min-height:0; display:flex; flex-direction:column; gap:4px;}
 
+  /* Prioritize panel: detector state is the gate; ESTIMATED nearby population is the rank. */
+  .panel-priority{grid-template-columns:1fr; grid-template-rows:auto auto minmax(0,1fr) auto; gap:9px; padding:9px clamp(14px,3vw,32px) 11px;}
+  .priority-method{font-size:12px; color:var(--ink-2); background:var(--wash); border-left:3px solid var(--orange); padding:8px 12px;}
+  .priority-summary{font-family:var(--font-mono); font-weight:700; color:var(--ink);}
+  #priority-list{min-height:0; overflow:auto; border:1px solid var(--rule-soft); background:var(--panel-2);}
+  .priority-row{display:grid; grid-template-columns:52px minmax(170px,1fr) minmax(180px,.8fr) 120px; gap:12px; align-items:center; padding:9px 12px; border-bottom:1px solid var(--rule-soft);}
+  .priority-row:last-child{border-bottom:0;}
+  .priority-row.head{position:sticky; top:0; z-index:1; color:var(--muted); background:var(--panel); font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.08em;}
+  .priority-rank{font:700 15px/1 var(--font-mono); color:var(--orange-text);}
+  .priority-site{min-width:0;}
+  .priority-site strong,.priority-site span{display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .priority-site span{font-size:11px; color:var(--muted); margin-top:2px;}
+  .priority-pop,.priority-severity{font-family:var(--font-mono); font-variant-numeric:tabular-nums; text-align:right;}
+  .priority-pop.unavailable{font-family:var(--font-ui); color:var(--muted); font-size:11.5px;}
+  .priority-empty,.priority-error{padding:24px; color:var(--muted); text-align:center;}
+  .priority-error{color:var(--red);}
+  .priority-credit{font-size:10.5px; color:var(--muted);}
+  @media (max-width:760px){
+    .priority-row{grid-template-columns:42px minmax(130px,1fr) 120px;}
+    .priority-severity{display:none;}
+  }
+
   /* Panel header row (provenance tag + title + ⓘ) */
   .panel-bar{display:flex; align-items:center; gap:5px 12px; flex-wrap:wrap;}
   .panel-bar h2{margin:0; font-size:14px; font-weight:700;}
@@ -314,6 +336,7 @@
 
 <nav class="tabs" role="tablist" aria-label="Dashboard views">
   <button type="button" class="tab-btn live active" data-tab="live" aria-selected="true"><span class="dotc"></span>Live Operations</button>
+  <button type="button" class="tab-btn sim" data-tab="priority" aria-selected="false"><span class="dotc"></span>Prioritize</button>
   <button type="button" class="tab-btn sim" data-tab="map" aria-selected="false"><span class="dotc"></span>Severity Map</button>
   <button type="button" class="tab-btn real" data-tab="eval" aria-selected="false"><span class="dotc"></span>Detector Evidence</button>
 </nav>
@@ -381,6 +404,23 @@
         </div>
       </div>
     </div>
+  </section>
+
+  <section class="tab-panel panel-priority" id="tab-priority" role="tabpanel" aria-label="Prioritized flagged towers">
+    <div class="panel-bar">
+      <span class="tag sim">SIMULATED + ESTIMATED</span>
+      <h2>Prioritize flagged towers</h2>
+      <span class="sec-sub">Gate first; rank second. No population totals.</span>
+    </div>
+    <div class="priority-method">
+      <strong>SIMULATED severity gate -&gt; ESTIMATED nearby population (exposure proxy)</strong>
+      · <span class="priority-summary" id="priority-summary">not connected</span>
+      · Severity decides which towers enter the list; estimated people within 2 km ranks the flagged set.
+    </div>
+    <div id="priority-list" aria-live="polite">
+      <div class="priority-empty">Connect to the SyncGuard API to load current priorities.</div>
+    </div>
+    <div class="priority-credit">Population: Meta Data for Good / CIESIN High Resolution Population Density Maps (HDX, CC BY 4.0), circa 2020, estimated.</div>
   </section>
 
   <section class="tab-panel panel-map" id="tab-map" role="tabpanel" aria-label="Severity map">
@@ -676,6 +716,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   const moranIEl = $('moran-i'), moranPEl = $('moran-p'), moranNEl = $('moran-n');
   const speedHintEl = $('speed-hint'), explainPanel = $('explain-panel');
   const feedbackPillEl = $('feedback-pill'), feedbackPrecisionEl = $('feedback-precision');
+  const priorityListEl = $('priority-list'), prioritySummaryEl = $('priority-summary');
   // event_id -> the API's current feedback record. A cache in front of the API, never
   // a substitute for it: every panel open re-reads the server and repaints.
   const feedbackByEvent = new Map();
@@ -697,10 +738,55 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   // browser history and Referer headers) and never written to localStorage.
   const apiKeyInput = $('api-key');
   let authRequired = false;
+  let priorityRefreshTimer = null;
 
   // credentials:'include' on every call, so one code path works in both modes.
   function api(path, options){
     return fetch(base() + path, Object.assign({credentials: 'include'}, options || {}));
+  }
+
+  function escapeHtml(value){
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+      '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+    })[ch]);
+  }
+
+  function renderPriority(payload){
+    const rows = payload.towers || [];
+    prioritySummaryEl.textContent = `${payload.n_flagged ?? rows.length} flagged tower${(payload.n_flagged ?? rows.length) === 1 ? '' : 's'}`;
+    if(!rows.length){
+      priorityListEl.innerHTML = `<div class="priority-empty">${escapeHtml(payload.empty_state || 'No towers are currently flagged by the severity gate.')}</div>`;
+      return;
+    }
+    priorityListEl.innerHTML =
+      `<div class="priority-row head"><div>Rank</div><div>Tower</div><div style="text-align:right">Estimated people within 2 km</div><div class="priority-severity">SIMULATED severity</div></div>` +
+      rows.map(row => {
+        const unavailable = row.pop_2km === null || row.pop_2km === undefined;
+        const population = unavailable ? 'population unavailable' : Math.round(row.pop_2km).toLocaleString();
+        const severity = (row.severity === null || row.severity === undefined) ? '—' : Number(row.severity).toFixed(3);
+        return `<div class="priority-row">
+          <div class="priority-rank">#${escapeHtml(row.rank)}</div>
+          <div class="priority-site"><strong>${escapeHtml(row.site_id || row.tower_key)}</strong><span>${escapeHtml(row.site_name || row.tower_key)}</span></div>
+          <div class="priority-pop${unavailable ? ' unavailable' : ''}">${escapeHtml(population)}</div>
+          <div class="priority-severity">${escapeHtml(severity)}</div>
+        </div>`;
+      }).join('');
+  }
+
+  async function refreshPriority(){
+    try{
+      const response = await api('/priority');
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      renderPriority(await response.json());
+    }catch(err){
+      prioritySummaryEl.textContent = 'unavailable';
+      priorityListEl.innerHTML = `<div class="priority-error">Could not load priorities: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function schedulePriorityRefresh(){
+    if(priorityRefreshTimer) clearTimeout(priorityRefreshTimer);
+    priorityRefreshTimer = setTimeout(refreshPriority, 200);
   }
 
   async function establishSession(){
@@ -1047,6 +1133,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         });
       });
       renderLiveMap();
+      await refreshPriority();
       openStream();
 
       if(moranTimer) clearInterval(moranTimer);
@@ -1074,6 +1161,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         alert_state: ev.alert_state,
       });
       renderLiveMap();
+      schedulePriorityRefresh();
       logEvent(ev);
       sessionCount += 1;
       countEl.textContent = sessionCount;

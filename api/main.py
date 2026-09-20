@@ -27,6 +27,7 @@ from api.schemas import (TelemetryInput, ScoreResponse, HealthResponse, Autocorr
 from api.model_service import ModelService, ModelNotFoundError
 from api.db import EventStore
 from api.spatial import load_towers, TowerAttributor, LiveCorrelationEngine
+from api.exposure import attach_exposure, rank_priority, records_with_nulls
 from api.spatial_stats import compute_autocorrelation
 from api.replay import ReplayManager, EventBus, list_run_ids
 from api.ingest import IngestService, UnknownTowerError
@@ -81,7 +82,9 @@ async def lifespan(app: FastAPI):
         app.state.baseline = None
 
     app.state.event_store = EventStore()
-    towers = load_towers()
+    # Real tower records plus ESTIMATED nearby population (pop_1km / pop_2km, joined by
+    # (lat, lon) -- never site_id). See api/exposure.py and PRIORITIZE_NOTES.md.
+    towers = attach_exposure(load_towers())
     app.state.towers = towers
     app.state.tower_attributor = TowerAttributor(towers)
     app.state.correlation_engine = LiveCorrelationEngine(towers, app.state.event_store)
@@ -508,7 +511,11 @@ async def ingest(batch: IngestBatch):
 
 @app.get("/towers")
 async def towers():
-    return app.state.towers.to_dict(orient="records")
+    """The real tower records. `pop_1km` / `pop_2km` are ESTIMATED people within 1 km / 2 km
+    (Meta Data for Good / CIESIN HRSL, ~2020, CC BY 4.0) -- an exposure proxy, not people
+    served -- and are null where no estimate is available. They overlap between neighbouring
+    towers and must not be summed."""
+    return records_with_nulls(app.state.towers)
 
 
 @app.get("/events")
@@ -520,6 +527,26 @@ async def events(limit: int = Query(default=200, le=2000)):
 async def events_map():
     """Latest scored event per tower -- what the dashboard renders as the current map state."""
     return list(app.state.event_store.latest_severity_per_tower().values())
+
+
+@app.get("/priority")
+async def priority():
+    """Which flagged towers to look at first: gate, then rank by estimated nearby population.
+
+    Gate: severity decides which towers are flagged -- a tower is in the list only if its
+    latest event is in hysteresis state 'alerting' (or, for events that carry no hysteresis
+    state such as POST /score, its per-reading verdict is 'attack', i.e. probability >= 0.52).
+    Rank: flagged towers are ordered by ESTIMATED people within 2 km (`pop_2km`), descending;
+    severity is a secondary field. This is deliberately NOT severity x population, which would
+    just be a population ranking -- see PRIORITIZE_NOTES.md.
+
+    Populations are an exposure proxy (~2020 estimates), not people served, and they overlap
+    between towers -- the response carries no total, and none should be computed from it.
+    """
+    latest = app.state.event_store.latest_severity_per_tower()
+    ms = app.state.model_service
+    threshold = ms.decision_threshold if ms is not None else 0.52
+    return rank_priority(latest, app.state.towers, threshold=threshold)
 
 
 @app.get("/events/{event_id}/explain", response_model=ExplainResponse)

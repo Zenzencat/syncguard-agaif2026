@@ -181,7 +181,7 @@ def test_auth_disabled_by_default(open_client):
     a judge will actually meet.
     """
     assert open_client.get("/health").json()["auth_required"] is False
-    for path in ("/towers", "/events?limit=1", "/events/map", "/metrics", "/drift",
+    for path in ("/towers", "/events?limit=1", "/events/map", "/priority", "/metrics", "/drift",
                  "/replay/runs", "/feedback/summary", "/spatial/autocorrelation",
                  "/dashboard", "/docs"):
         assert open_client.get(path).status_code == 200, \
@@ -224,7 +224,7 @@ def test_dashboard_and_docs_are_exempt(auth_client):
 
 
 @pytest.mark.parametrize("path", [
-    "/towers", "/events?limit=1", "/events/map", "/metrics", "/drift",
+    "/towers", "/events?limit=1", "/events/map", "/priority", "/metrics", "/drift",
     "/replay/runs", "/replay/status", "/feedback/summary", "/feedback/export",
     "/spatial/autocorrelation",
 ])
