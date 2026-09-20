@@ -22,7 +22,19 @@ incidents. This module adds a simple, explicitly-approved grouping rule on top o
      group by shared timing source or region, not raw distance.
   2. The chain also breaks across two different non-null replay run_ids, even if both other
      checks pass -- two separate replay runs are never merged into one incident just because
-     they were scored close together in wall-clock time.
+     they were scored close together in wall-clock time. run_id is only the RECORDING, so two
+     replays of the same scenario share it; the per-start `replay_session` (api/replay.py)
+     breaks the chain between those too, so re-running a scenario opens a new incident instead
+     of extending -- and inheriting the Dismissed/Confirmed status of -- the previous run's.
+     Rows written before that column existed have no session and fall back to the run_id rule.
+
+Which events: GET /incidents feeds this every flagged event in the store (up to
+api/db.py::INCIDENT_EVENT_CAP, newest first), not the newest N events of any kind. An
+incident's ID is INC-<id of its first event>, so a sliding window used to both drop old
+incidents and RENAME long-running ones as their first events slid out of it. Over the full
+flagged history the ID is a pure function of stored rows: events are appended in time order,
+so a later event can only extend the last incident or start a new one -- it can never change
+an existing incident's first event, and IDs are never reassigned.
 
 Which clock: every timestamp here is `created_at`, the server's insert time for the scored
 row -- NOT the original recording's observation timestamp. This is the same clock
@@ -97,23 +109,30 @@ def build_incidents(events: list[dict], feedback_by_event: dict[int, dict],
     current: list[dict] = []
     prev_event: dict | None = None
     current_run_id = None
+    current_session = None
     for e in flagged:
         ts = _parse_ts(e["created_at"])
         run_id = e.get("run_id")
+        session = e.get("replay_session")
         join = False
         if current and prev_event is not None:
             prev_ts = _parse_ts(prev_event["created_at"])
             gap_ok = (ts - prev_ts).total_seconds() <= window_seconds
             dist_ok = _within_distance(prev_event, e, distance_km)
             run_ok = not (run_id is not None and current_run_id is not None and run_id != current_run_id)
-            join = gap_ok and dist_ok and run_ok
+            session_ok = not (session is not None and current_session is not None
+                              and session != current_session)
+            join = gap_ok and dist_ok and run_ok and session_ok
         if current and not join:
             groups.append(current)
             current = []
             current_run_id = None
+            current_session = None
         current.append(e)
         if run_id is not None:
             current_run_id = run_id
+        if session is not None:
+            current_session = session
         prev_event = e
     if current:
         groups.append(current)

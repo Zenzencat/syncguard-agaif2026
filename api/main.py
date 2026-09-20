@@ -26,7 +26,7 @@ from api.schemas import (TelemetryInput, ScoreResponse, HealthResponse, Autocorr
                          ExplainResponse, IngestBatch, IngestResponse, FeedbackRequest,
                          FeedbackRecord, FeedbackSummary, IncidentsResponse)
 from api.model_service import ModelService, ModelNotFoundError
-from api.db import EventStore
+from api.db import EventStore, INCIDENT_EVENT_CAP
 from api.spatial import load_towers, TowerAttributor, EpicenterWeightedAttributor, LiveCorrelationEngine
 from api.exposure import attach_exposure, pop_2km_by_tower, rank_priority, records_with_nulls
 from api.incidents import build_incidents, INCIDENT_WINDOW_SECONDS, INCIDENT_DISTANCE_KM
@@ -570,11 +570,15 @@ async def events_map():
 
 
 @app.get("/incidents", response_model=IncidentsResponse)
-async def incidents(limit: int = Query(default=2000, le=2000)):
+async def incidents(limit: int = Query(default=INCIDENT_EVENT_CAP, ge=1, le=INCIDENT_EVENT_CAP)):
     """The NOC tab's incident queue: flagged events grouped into incidents. See
     api/incidents.py for the grouping rule -- time AND distance chaining, not a real
-    spatial-clustering algorithm."""
-    events_rows = app.state.event_store.recent_events(limit=limit)
+    spatial-clustering algorithm.
+
+    Built from the stored FLAGGED events (newest `limit`, at most INCIDENT_EVENT_CAP), not from
+    the newest N events of any kind, so the queue and incident IDs are stable across page
+    reloads and across a full replay."""
+    events_rows = app.state.event_store.flagged_events(limit=limit)
     event_ids = [e["id"] for e in events_rows]
     feedback_by_event = app.state.event_store.feedback_for_events(event_ids)
     grouped = build_incidents(events_rows, feedback_by_event,
@@ -588,7 +592,9 @@ async def incidents(limit: int = Query(default=2000, le=2000)):
             "stateless /score calls) are chained into one incident when no more than "
             f"{INCIDENT_WINDOW_SECONDS}s apart by created_at (server insert time, 'recording "
             f"time' during replay) AND no more than {INCIDENT_DISTANCE_KM:g}km apart by real "
-            "tower distance, never across two different replay runs. A demo heuristic, not a "
+            "tower distance, never across two different replay runs or two starts of the same "
+            "scenario, over every stored alerting event (up to the newest "
+            f"{INCIDENT_EVENT_CAP:,}). A demo heuristic, not a "
             "real spatial-clustering algorithm. Status comes from existing analyst "
             "confirm/dismiss labels on the incident's peak-severity event; nothing here is "
             "learned. See api/incidents.py."

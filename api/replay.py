@@ -12,6 +12,7 @@ are nullable.
 """
 from __future__ import annotations
 import asyncio
+import uuid
 import functools
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,6 +113,7 @@ class ReplayManager:
         self._task: asyncio.Task | None = None
         self._status = "idle"
         self._run_id: str | None = None
+        self._session_id: str | None = None
         self._speed = 1.0
         self._attribution = DEFAULT_ATTRIBUTION
         self._rows_replayed = 0
@@ -151,6 +153,9 @@ class ReplayManager:
         self._error = None
         self._live_explain = self._speed <= LIVE_EXPLAIN_MAX_SPEED
         self._hysteresis = AlertHysteresis()  # a new session starts with no prior streak
+        # Identifies THIS start. run_id is only the recording, so re-running the same scenario
+        # reuses it; incident grouping needs the session to keep the two runs apart.
+        self._session_id = uuid.uuid4().hex[:12]
         self._status = "running"
         self._task = asyncio.create_task(self._run(resolved_run_id, self._speed))
         return self.status
@@ -162,6 +167,7 @@ class ReplayManager:
         return self.status
 
     async def _run(self, run_id: str, speed: float):
+        session_id = self._session_id  # fixed for this run; start() refuses to overlap runs
         df = _load_dataset()
         rows = df[df["run_id"] == run_id].sort_values("real_time").reset_index(drop=True)
         self._total_rows = len(rows)
@@ -184,6 +190,7 @@ class ReplayManager:
                     "created_at": created_at,
                     "source": "replay",
                     "run_id": run_id,
+                    "replay_session": session_id,
                     "scenario_id": row.get("scenario_id"),
                     "attack_type": row.get("attack_type"),
                     "true_attack": int(row["attack"]),

@@ -182,7 +182,7 @@ def test_max_pop_2km_is_null_when_no_population_data_given():
 
 
 def test_incidents_endpoint_empty_state(client, monkeypatch):
-    monkeypatch.setattr(client.app.state.event_store, "recent_events", lambda limit=2000: [])
+    monkeypatch.setattr(client.app.state.event_store, "flagged_events", lambda limit=20000: [])
     monkeypatch.setattr(client.app.state.event_store, "feedback_for_events", lambda ids: {})
     response = client.get("/incidents")
     assert response.status_code == 200
@@ -200,7 +200,7 @@ def test_incidents_endpoint_groups_real_scored_events(client, monkeypatch, tower
          "severity": 0.95, "alert_state": "alerting", "predicted_label": "attack",
          "created_at": "2099-01-01T00:00:00+00:00", "attack_type": None},
     ]
-    monkeypatch.setattr(client.app.state.event_store, "recent_events", lambda limit=2000: fake_events)
+    monkeypatch.setattr(client.app.state.event_store, "flagged_events", lambda limit=20000: fake_events)
     monkeypatch.setattr(client.app.state.event_store, "feedback_for_events", lambda ids: {})
     response = client.get("/incidents")
     assert response.status_code == 200

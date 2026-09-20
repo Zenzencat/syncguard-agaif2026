@@ -61,7 +61,27 @@ _MIGRATIONS = [
     # scoped to rows with source='ingest': a NULL obs_timestamp can never collide.
     "ALTER TABLE scored_events ADD COLUMN obs_timestamp TEXT",
     "ALTER TABLE scored_events ADD COLUMN ingest_batch_id TEXT",
+    # Which replay START produced a replay row. run_id is the recording (scenario) id, so two
+    # replays of the same scenario share it; without this, a re-run started within the incident
+    # window merged into the previous run's incident (and inherited its Dismissed/Confirmed
+    # status) instead of opening a new one. NULL for non-replay rows and for rows written before
+    # this migration -- incident grouping then falls back to the run_id rule alone.
+    "ALTER TABLE scored_events ADD COLUMN replay_session TEXT",
 ]
+
+# Upper bound on how many flagged events GET /incidents will consider (newest first). Flagged
+# events only -- normal readings are not read at all -- so this is roughly 8 full replays (a
+# 2,503-row replay flags ~2,400). MEASURED cost is linear, ~7 us per flagged event end to end
+# (36 ms for 5,312 events), so the cap bounds the per-poll work the dashboard triggers every
+# ~1.5 s at roughly 140 ms. Past it the OLDEST events drop out of the queue; that is the one
+# remaining way an incident can age out, and the response's method_note says so.
+INCIDENT_EVENT_CAP = 20_000
+
+# Only the columns api/incidents.py reads. features_json / top_features_json are large and the
+# queue is re-read every ~1.5 s by the dashboard, so SELECT * would move megabytes per poll.
+_INCIDENT_COLUMNS = ("id, created_at, source, run_id, replay_session, attack_type, severity, "
+                     "predicted_label, alert_state, tower_site_id, tower_site_name, "
+                     "tower_lat, tower_lon")
 
 _POST_MIGRATION_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_scored_events_ingest_dedup
@@ -146,8 +166,8 @@ class EventStore:
                     probability, severity, predicted_label, model_version,
                     tower_site_id, tower_site_name, tower_lat, tower_lon,
                     correlation_score, features_json, top_features_json, alert_state,
-                    obs_timestamp, ingest_batch_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    obs_timestamp, ingest_batch_id, replay_session)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     event.get("created_at") or datetime.now(timezone.utc).isoformat(),
                     event["source"],
@@ -169,6 +189,7 @@ class EventStore:
                     event.get("alert_state"),
                     event.get("obs_timestamp"),
                     event.get("ingest_batch_id"),
+                    event.get("replay_session"),
                 ),
             )
             self._conn.commit()
@@ -197,6 +218,25 @@ class EventStore:
                 "SELECT * FROM scored_events ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [self._row_to_dict(r) for r in rows]
+
+    def flagged_events(self, limit: int = INCIDENT_EVENT_CAP) -> list[dict]:
+        """The newest `limit` FLAGGED events, newest first, with only the columns incident
+        grouping needs. "Flagged" is exactly api/exposure.py::is_flagged: hysteresis state
+        'alerting', or -- for rows with no hysteresis state such as POST /score -- a per-reading
+        'attack' verdict.
+
+        This is what makes the incident queue stable: it reads the whole stored history of
+        alerts instead of the newest N events of any kind, so incidents (and their IDs, which
+        are derived from their first event) no longer slide out of view as later readings pile
+        up -- a single 2,503-row replay already exceeded the old 2,000-event window."""
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {_INCIDENT_COLUMNS} FROM scored_events "
+                "WHERE alert_state = 'alerting' "
+                "   OR (alert_state IS NULL AND predicted_label = 'attack') "
+                "ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def events_for_tower_since(self, tower_site_id: str, since_iso: str) -> list[dict]:
         with self._lock:
@@ -294,12 +334,18 @@ class EventStore:
         instead of one get_feedback() call per event."""
         if not event_ids:
             return {}
-        placeholders = ",".join("?" * len(event_ids))
-        with self._lock:
-            rows = self._conn.execute(
-                f"SELECT * FROM event_feedback WHERE event_id IN ({placeholders})", event_ids
-            ).fetchall()
-        return {r["event_id"]: dict(r) for r in rows}
+        out: dict[int, dict] = {}
+        # Chunked: an incident queue can now span tens of thousands of events, past SQLite's
+        # bound-parameter limit for a single IN (...) list.
+        for i in range(0, len(event_ids), 500):
+            chunk = event_ids[i:i + 500]
+            placeholders = ",".join("?" * len(chunk))
+            with self._lock:
+                rows = self._conn.execute(
+                    f"SELECT * FROM event_feedback WHERE event_id IN ({placeholders})", chunk
+                ).fetchall()
+            out.update({r["event_id"]: dict(r) for r in rows})
+        return out
 
     def upsert_feedback(self, event_id: int, label: str, note: str | None = None,
                         analyst: str | None = None) -> dict:
