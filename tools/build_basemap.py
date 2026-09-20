@@ -2,6 +2,15 @@
 Kubu Raya/Pontianak tower bounding box via the Overpass API, simplify it, and write it to
 assets/offline_basemap.geojson for the dashboard to serve locally (no runtime network calls).
 
+This builds the VECTOR layer, which the dashboard now uses only as a fallback. The dashboard's
+primary base layer is a raster image rendered from the same OpenStreetMap data by
+tools/build_basemap_raster.py and embedded in this same asset. Data (c) OpenStreetMap
+contributors, licensed under the Open Database License (ODbL); attribution is shown in the
+dashboard footer and map caption -- see assets/OFFLINE_BASEMAP_ATTRIBUTION.md.
+
+WARNING: this script overwrites the WHOLE asset, including the embedded "raster" member. Re-run
+tools/build_basemap_raster.py (with --from-cache) afterwards to put the raster back.
+
 Run once, with network access, whenever the bundled basemap needs rebuilding:
     .venv\\Scripts\\python.exe tools\\build_basemap.py
 

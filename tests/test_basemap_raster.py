@@ -1,8 +1,9 @@
 """The styled COLOR base image (tools/build_basemap_raster.py) embedded in the basemap asset.
 
-The image is a rendering of REAL OpenStreetMap data for the tower bounding box; its colors and
-line widths are styling only. It is built once offline and served from the existing same-origin
-asset -- no tile server or runtime fetch. Attribution: (c) OpenStreetMap contributors (ODbL).
+The image is a raster rendered from REAL OpenStreetMap data for the tower bounding box; its colors
+and line widths are styling only. It is built once offline and served from the existing same-origin
+asset -- no tile server or runtime fetch. Attribution: (c) OpenStreetMap contributors, Open
+Database License (ODbL).
 
 Static checks against the asset and the served dashboard script (no JS runner in this repo); the
 behaviour -- image drawn beneath the WebGL markers, on both maps, light and dark theme -- was
@@ -103,8 +104,9 @@ def test_live_map_redraws_when_the_image_arrives(client):
 def test_dark_theme_dims_the_image_and_caption_still_credits_osm(client):
     html = client.get("/dashboard").text
     assert re.search(r':root:not\(\[data-theme="light"\]\) #live-map image[^{]*\{filter:brightness', html)
-    assert "Basemap: styled OpenStreetMap render, bundled offline" in html
+    assert "Basemap: raster rendered from OpenStreetMap data, bundled offline" in html
     assert ATTRIBUTION in html
+    assert "Open Database License (ODbL)" in html      # footer names the licence in full
 
 
 def test_no_new_network_references_in_the_dashboard(client):

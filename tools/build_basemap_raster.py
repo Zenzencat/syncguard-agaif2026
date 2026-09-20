@@ -25,7 +25,8 @@ Usage (repo venv, network only needed the first time; caches to tools/basemap_ca
 
 REAL: every feature drawn is real OpenStreetMap data for the tower bounding box. The STYLE (colors,
 line widths, which road classes get a casing) is this script's own and carries no information.
-Attribution: (c) OpenStreetMap contributors (ODbL) -- kept in the dashboard footer and map caption.
+Attribution: the image is a raster rendered from OpenStreetMap data, (c) OpenStreetMap
+contributors, Open Database License (ODbL) -- kept in the dashboard footer and map caption.
 """
 from __future__ import annotations
 

@@ -109,4 +109,4 @@ def test_dashboard_assets_are_local_and_served(client):
     body = basemap.json()
     assert body["type"] == "FeatureCollection"
     assert body["attribution"] == "(c) OpenStreetMap contributors (ODbL)"
-    assert body["features"], "the offline vector basemap layer must not be empty"
+    assert body["features"], "the vector fallback layer (OpenStreetMap-derived) must not be empty"

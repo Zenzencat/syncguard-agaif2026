@@ -1,9 +1,10 @@
-"""Task 1: the OSM vector basemap asset (tools/build_basemap.py -> assets/offline_basemap.geojson).
+"""Task 1: the OpenStreetMap-derived vector layer of the basemap asset (tools/build_basemap.py ->
+assets/offline_basemap.geojson; the dashboard's primary layer is the raster rendered from the same data).
 
 Locations of the 136 towers are REAL. The basemap under them (coastline, water, rivers,
 roads, built-up areas, place labels) is REAL OpenStreetMap data for the same bounding box,
 fetched once at build time -- not a runtime call. Attribution: (c) OpenStreetMap
-contributors, ODbL.
+contributors, Open Database License (ODbL).
 """
 from __future__ import annotations
 

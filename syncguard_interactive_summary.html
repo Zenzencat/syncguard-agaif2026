@@ -429,7 +429,7 @@
         <span><i class="ring sel"></i>Selected incident</span>
       </div>
       <div class="chart-fill"><div id="live-map"></div></div>
-      <div class="map-attribution">Basemap: styled OpenStreetMap render, bundled offline · (c) OpenStreetMap contributors (ODbL)</div>
+      <div class="map-attribution">Basemap: raster rendered from OpenStreetMap data, bundled offline · (c) OpenStreetMap contributors (ODbL)</div>
     </div>
 
     <div class="side-col">
@@ -558,7 +558,7 @@
 </div>
 
 <footer>
-  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · Basemap: (c) OpenStreetMap contributors (ODbL), bundled offline · <span class="has-pop"><span>Data sources &amp; offline behaviour</span><button type="button" class="info" aria-label="Data sources and offline behaviour: details" aria-expanded="false">ⓘ</button><span class="pop up" role="tooltip"><span class="pop-body"><span class="pop-p">Plotly 2.35.2 and the OpenStreetMap-derived vector basemap layer are served locally; the dashboard loads no internet resources. The basemap was built once, offline, from OpenStreetMap data via the Overpass API (tools/build_basemap.py) -- not fetched at runtime. About the detector is recomputed by the API from the shipped model and fixed eight-recording held-out set. Spatial analysis is a documented simulation on real tower coordinates. NOC and Prioritize call the local SyncGuard API.</span></span></span></span>
+  Team Lorem Ipsum (HACK_TH_014) · SyncGuard · ASEAN GeoAI Fusion 2026 · Basemap: raster image rendered from OpenStreetMap data, bundled offline · (c) OpenStreetMap contributors, Open Database License (ODbL) · <span class="has-pop"><span>Data sources &amp; offline behaviour</span><button type="button" class="info" aria-label="Data sources and offline behaviour: details" aria-expanded="false">ⓘ</button><span class="pop up" role="tooltip"><span class="pop-body"><span class="pop-p">Plotly 2.35.2 and the basemap are served locally; the dashboard loads no internet resources. The basemap is a raster image rendered from OpenStreetMap data (© OpenStreetMap contributors, Open Database License, ODbL); a small vector layer built from the same data is kept as a fallback. Both were built once, offline, from data fetched via the Overpass API (tools/build_basemap_raster.py, tools/build_basemap.py) -- not fetched at runtime. About the detector is recomputed by the API from the shipped model and fixed eight-recording held-out set. Spatial analysis is a documented simulation on real tower coordinates. NOC and Prioritize call the local SyncGuard API.</span></span></span></span>
 </footer>
 
 <script>
@@ -619,7 +619,8 @@ const FONT_MONO = 'DejaVu Sans Mono, Consolas, monospace';
 let currentTimestep = 0;
 let offlineBasemap = null;
 let offlineBasemapIsFallback = false;
-// Styled color base image embedded in the bundled basemap asset (built once offline by
+// Styled color base image (a raster rendered from OpenStreetMap data; (c) OpenStreetMap
+// contributors, ODbL) embedded in the bundled basemap asset (built once offline by
 // tools/build_basemap_raster.py). null until it has decoded, or forever if it fails to -- in
 // which case the maps fall back to the vector layer, exactly as before.
 let basemapRaster = null;   // {url: blob: URL, bbox: [west, south, east, north]}
@@ -663,12 +664,14 @@ function decodeBasemapRaster(raster){
 }
 
 // Same-origin, bundled GeoJSON: no tiles, fonts, scripts, or map services are fetched from
-// the internet. Primary layer is OpenStreetMap-derived, built once offline by
-// tools/build_basemap.py (see assets/OFFLINE_BASEMAP_ATTRIBUTION.md); if it fails to load,
+// the internet. Primary layer is a raster image rendered from OpenStreetMap data (built once
+// offline by tools/build_basemap_raster.py and embedded in the asset; (c) OpenStreetMap
+// contributors, ODbL -- see assets/OFFLINE_BASEMAP_ATTRIBUTION.md), with a vector layer from
+// the same data (tools/build_basemap.py) as its fallback. If the asset itself fails to load,
 // fall back to the smaller bundled Natural Earth layer so the map still has orientation.
 const offlineBasemapReady = loadBasemapFrom('/assets/offline_basemap.geojson', false)
   .catch(error => {
-    console.error('Primary OSM basemap failed to load, falling back to Natural Earth:', error);
+    console.error('Primary basemap (rendered from OpenStreetMap data) failed to load, falling back to Natural Earth:', error);
     return loadBasemapFrom('/assets/offline_basemap_natural_earth_fallback.geojson', true)
       .catch(fallbackError => console.error('Fallback basemap also failed to load:', fallbackError));
   });

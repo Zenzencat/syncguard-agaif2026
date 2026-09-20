@@ -891,9 +891,11 @@ async def dashboard_plotly():
 
 @app.get("/assets/offline_basemap.geojson", include_in_schema=False)
 async def dashboard_basemap():
-    """OSM vector basemap (coastline, water, named rivers, major roads, built-up areas, place
-    labels) for the local tower-map bounding box -- built once, offline, by
-    tools/build_basemap.py. See assets/OFFLINE_BASEMAP_ATTRIBUTION.md."""
+    """Bundled basemap asset for the local tower-map bounding box: a raster image rendered from
+    OpenStreetMap data (top-level "raster" member, built by tools/build_basemap_raster.py) plus a
+    vector layer from the same data (coastline, water, named rivers, major roads, built-up areas,
+    place labels; tools/build_basemap.py). Both built once, offline. (c) OpenStreetMap
+    contributors, ODbL -- see assets/OFFLINE_BASEMAP_ATTRIBUTION.md."""
     if not BASEMAP_PATH.exists():
         raise HTTPException(404, "offline basemap asset not found")
     return FileResponse(BASEMAP_PATH, media_type="application/geo+json")
@@ -902,7 +904,7 @@ async def dashboard_basemap():
 @app.get("/assets/offline_basemap_natural_earth_fallback.geojson", include_in_schema=False)
 async def dashboard_basemap_fallback():
     """Fallback only: the original small Natural Earth land/coastline/rivers layer, used by
-    the dashboard only if the OSM basemap above fails to load."""
+    the dashboard only if the OpenStreetMap-derived basemap above fails to load."""
     if not BASEMAP_FALLBACK_PATH.exists():
         raise HTTPException(404, "fallback basemap asset not found")
     return FileResponse(BASEMAP_FALLBACK_PATH, media_type="application/geo+json")

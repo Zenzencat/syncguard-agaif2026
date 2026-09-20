@@ -457,6 +457,16 @@ confirmed open license such as CC-BY. It's bundled here because it's a public do
 government transparency portal, not because redistribution rights have been formally
 confirmed — see [`project_abstract.md`](project_abstract.md) §3 for the full framing.
 
+**Basemap and its attribution.** The map under the tower markers in the dashboard is a raster
+image rendered from OpenStreetMap data (a Kubu Raya / Pontianak extract fetched once from the
+Overpass API at build time, then styled and drawn offline by `tools/build_basemap_raster.py`).
+The map data is © OpenStreetMap contributors, available under the Open Database License
+(ODbL) — <https://www.openstreetmap.org/copyright>. The dashboard shows this credit in the
+map-corner caption and the page footer, and [`assets/OFFLINE_BASEMAP_ATTRIBUTION.md`](assets/OFFLINE_BASEMAP_ATTRIBUTION.md)
+documents the sources. A smaller vector layer built from the same OpenStreetMap data
+(`tools/build_basemap.py`) is kept only as a fallback, and a Natural Earth (public-domain)
+layer as a last resort. Nothing is fetched at runtime.
+
 **To reproduce from scratch:**
 
 ```bash
@@ -475,6 +485,12 @@ python build_spatial_simulation.py  # offline SIMULATED spatial layer -> spatial
 ## Licensing
 
 **This repository's code** (`.py` files, this README) — [MIT License](LICENSE).
+
+**The basemap is a separate work too.** The dashboard's base layer is a raster image rendered
+from OpenStreetMap data, © OpenStreetMap contributors, licensed under the
+[Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/); the credit must stay
+in the dashboard footer and map caption if the asset is redistributed. See
+[`assets/OFFLINE_BASEMAP_ATTRIBUTION.md`](assets/OFFLINE_BASEMAP_ATTRIBUTION.md).
 
 **The dataset is a separate work, not included here, not covered by that license.** It is
 licensed by its authors under the **GNU GPL v3.0 or later** (as stated on the Zenodo record).
