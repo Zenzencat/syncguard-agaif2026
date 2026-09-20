@@ -41,7 +41,7 @@ were fetched from a machine that could reach the site and supplied via `--data-d
 over HTTP. Every fact in this docstring about the data schema was confirmed by reading the
 site's actual deployed source code, not assumed.
 
-Spatial weights -- hex contiguity, not KNN: unlike the 136 irregularly-spaced Telkomsel towers
+Spatial weights -- hex contiguity, not KNN: unlike the 136 irregularly-spaced real tower locations
 (where KNN k=5 was the defensible choice -- see SPATIAL_STATISTICS.md), H3 hex cells form a
 regular grid where every interior cell has exactly 6 edge-adjacent neighbors. There is no
 rook-vs-queen distinction on a hex grid (each hex shares a full edge with each neighbor, unlike

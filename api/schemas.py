@@ -59,7 +59,7 @@ class FeatureVector(BaseModel):
 class TelemetryInput(FeatureVector):
     # --- optional context: not fed to the model, only used for persistence/spatial correlation ---
     receiver_id: Optional[str] = Field(default=None, description="Caller-supplied receiver/site identifier, for logging only")
-    tower_site_id: Optional[str] = Field(default=None, description="Real Telkomsel site_id (see spatial_raw tower CSV) if the caller knows which tower this reading is from -- enables live spatial correlation for this event. Omit if unknown.")
+    tower_site_id: Optional[str] = Field(default=None, description="Real tower site_id (see spatial_raw tower CSV) if the caller knows which tower this reading is from -- enables live spatial correlation for this event. Omit if unknown.")
 
 
 class InputWarning(BaseModel):

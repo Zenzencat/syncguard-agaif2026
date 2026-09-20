@@ -57,7 +57,7 @@ not inferred from secondhand descriptions:
 
 ### Spatial weights: hex contiguity, not KNN
 
-Unlike the 136 irregularly-spaced real Telkomsel towers (where KNN k=5 is the defensible
+Unlike the 136 irregularly-spaced real tower locations (where KNN k=5 is the defensible
 choice — see `SPATIAL_STATISTICS.md`), H3 hex cells form a regular grid where every interior
 cell has exactly 6 edge-adjacent neighbors. There is no rook-vs-queen ambiguity on a hex grid
 the way there is on a square grid (every neighbor shares a full edge, not just a corner) — so

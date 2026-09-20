@@ -49,7 +49,8 @@ known interference events. We have none. Phase 3's `/drift` will *measure* the d
 gap once real input arrives; it cannot tell you whether the model still works across it.
 
 ### 1.4 The tower coordinates are real
-✅ **VALIDATED.** 136 real Telkomsel tower rows from
+✅ **VALIDATED.** 136 real tower rows (Kubu Raya/Pontianak, from Indonesian national open data;
+operator labels are mixed, not a single operator) from
 `spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv` — real site ids, names
 and lat/lon. `tests/test_existing_endpoints.py` asserts the count and key uniqueness.
 Caveat that is *not* a caveat about the coordinates: 16 of the 136 share the literal `site_id`

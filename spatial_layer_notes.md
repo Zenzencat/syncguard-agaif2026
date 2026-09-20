@@ -34,8 +34,8 @@ public government data, not confirmed-open-license data).
 
 - **Country/region**: Indonesia — Kubu Raya and Pontianak, West Kalimantan (Kalimantan
   Barat).
-- **Coverage**: 136 real PT. Telkomsel cellular tower sites (`site_id`, `site_name`,
-  `desa`/village, `kec`/district, `lat`/`long`, tower type/height, construction metadata).
+- **Coverage**: 136 real cellular tower locations from Indonesian national open data (`site_id`,
+  `site_name`, `desa`/village, `kec`/district, `lat`/`long`, tower type/height, construction metadata).
   Verified clean on load: no missing lat/long, no duplicate coordinates, single coherent
   region (lat range roughly -0.86 to +0.10, lon range roughly 109.15 to 110.07).
 - This is real ASEAN telecom infrastructure. It was chosen over a messier ~3,547-row

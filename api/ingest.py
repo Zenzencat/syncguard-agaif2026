@@ -23,7 +23,7 @@ REAL / SIMULATED framing, unchanged by this module:
     not simulated the way replay's round-robin attribution is -- the caller states it. It is
     also not verified: this service cannot check that the submitted features were really
     observed at that tower. It is trusted input, not established fact.
-  - NOT a claim of field validation. No real GNSS receiver at a real Telkomsel tower has ever
+  - NOT a claim of field validation. No real GNSS receiver at a real telecom tower has ever
     fed this endpoint. See ASSUMPTIONS_PRODUCTION.md (Phase 3) and INGESTION_CONTRACT.md.
 
 Transport: HTTP only. MQTT / Kafka style transports are plausible future work for a real edge

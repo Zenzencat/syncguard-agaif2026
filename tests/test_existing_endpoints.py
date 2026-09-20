@@ -25,7 +25,7 @@ FEATURES = {
 def test_health(client):
     body = client.get("/health").json()
     assert body["model_loaded"] is True
-    assert body["towers_loaded"] == 136  # the real Telkomsel tower table
+    assert body["towers_loaded"] == 136  # the real tower table (mixed operator labels)
     assert body["status"] == "ok"
 
 

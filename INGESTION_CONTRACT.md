@@ -291,7 +291,7 @@ RINEX features are normal, not a collector bug.
 
 ## 5. `tower_id` resolution
 
-- Resolved against the **real** 136-tower Telkomsel table (`GET /towers`), the same source
+- Resolved against the **real** 136-tower table (`GET /towers`), the same source
   `api/spatial.py::load_towers` reads.
 - `tower_key` is tried first, then raw `site_id`. Prefer `tower_key`: **16 of the 136 real
   towers share the literal `site_id` "tbg"**, so a raw `site_id` there resolves

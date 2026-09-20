@@ -18,7 +18,7 @@ each other.
 
 Same discipline as everywhere else in this project (`api/spatial.py`, `spatial_layer_notes.md`):
 
-- **REAL**: the 136 Telkomsel tower coordinates; the k-nearest-neighbor spatial weights built
+- **REAL**: the 136 real tower coordinates (mixed operator labels); the k-nearest-neighbor spatial weights built
   from real great-circle distance between them (`libpysal.weights.KNN` with
   `radius=6371.0088`, the identical Earth-radius constant `api/spatial.py`'s `haversine_km`
   already uses); the severity values fed in (real `predict_proba` output from the trained

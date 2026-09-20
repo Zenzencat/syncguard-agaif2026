@@ -2,8 +2,8 @@
 SyncGuard spatial layer builder.
 
 Produces a NEW, clearly-labeled SIMULATED spatial anomaly-spread layer laid on top of
-REAL ASEAN telecom infrastructure locations (136 real Telkomsel tower sites, Kubu Raya /
-Pontianak, West Kalimantan, Indonesia -- source: menaratelepon_ar_50k.csv, bootcamp
+REAL ASEAN telecom infrastructure locations (136 real tower locations, Kubu Raya /
+Pontianak, West Kalimantan, Indonesia; operator labels mixed -- source: menaratelepon_ar_50k.csv, bootcamp
 Module 6 materials).
 
 What is REAL here: the 136 tower coordinates/site metadata, and the RandomForest
@@ -120,7 +120,7 @@ def reproduce_validated_model():
 
 
 # ---------------------------------------------------------------------------
-# Step 2: real tower locations (136 real Telkomsel sites, Kubu Raya/Pontianak)
+# Step 2: real tower locations (136 real tower sites, Kubu Raya/Pontianak; operator labels mixed)
 # ---------------------------------------------------------------------------
 def load_real_towers():
     log("[2/4] Loading real tower locations (menaratelepon_ar_50k.csv)...")
@@ -223,7 +223,7 @@ def plot_map(out, epicenter, floor, ceiling):
     ax.set_xlabel("Longitude")
     ax.set_ylabel("Latitude")
     ax.set_title(
-        "SIMULATED spoofing-spread severity over REAL Telkomsel tower locations\n"
+        "SIMULATED spoofing-spread severity over REAL tower locations\n"
         "(136 real sites, Kubu Raya/Pontianak, West Kalimantan, Indonesia -- "
         "severity/spread is a simulation, coordinates are real)",
         fontsize=10)

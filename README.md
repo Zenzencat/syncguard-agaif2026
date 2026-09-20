@@ -376,8 +376,11 @@ column comments, dashboard UI, every `_SIMULATED`-suffixed file).
 - **Signal-level ground truth** — the detector is trained and evaluated on real u-blox GNSS
   receiver logs recorded under *real* jamming / spoofing / meaconing attacks at a controlled
   interference test range (JammerTest 2024, Andøya Space Defense, Bleik, Norway). Not synthetic.
-- **Tower geometry** — 136 real PT. Telkomsel base-station sites (Kubu Raya & Pontianak, West
-  Kalimantan) — coordinates, site IDs, names, from the AGAIF bootcamp's Module 6 materials.
+- **Tower geometry** — 136 real tower locations (Kubu Raya & Pontianak, West Kalimantan) from
+  Indonesian national open data — coordinates, site IDs, names, supplied via the AGAIF bootcamp's
+  Module 6 materials. Operator labels are mixed (38 PT. TELKOMSEL, 30 INDOSAT, 30 PROTELINDO,
+  17 TBG, 8 XL AXIATA, 7 DAYAMITRA/Mitratel, 4 STP, 2 HCPT; the `namobj` field is simply "Object
+  Name" in the national schema), so this is not a single-operator network.
 - **Severity scale** — anchored to the detector's own `predict_proba()` on the held-out set:
   floor 0.43 (median clean-row probability), ceiling 0.993 (90th-percentile attack-row
   probability). Not invented numbers.
