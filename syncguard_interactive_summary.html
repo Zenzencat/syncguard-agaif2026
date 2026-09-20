@@ -505,8 +505,8 @@
     </div>
     <div class="spatial-analysis">
       <strong>Spatial analysis</strong>
-      <span>Global Moran's I: <b id="moran-i">—</b> (p=<span id="moran-p">—</span>)</span>
-      <span>Towers scored / minimum needed: <b id="moran-n">—</b></span>
+      <span>Global Moran's I: <b id="moran-i">—</b><span id="moran-p-wrap"> (p=<span id="moran-p">—</span>)</span></span>
+      <span id="moran-n-wrap">Towers scored / minimum needed: <b id="moran-n">—</b></span>
       <span class="note">Simulated attribution; result reflects the recording's own time pattern, not confirmed spatial spread.</span>
     </div>
     <div class="chart-fill"><div id="map"></div></div>
@@ -944,6 +944,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   const eventsById = new Map();   // event_id -> {top_features, attack_type, tower, severity, predicted_label, ...}
   let allTowers = [];
   const moranIEl = $('moran-i'), moranPEl = $('moran-p'), moranNEl = $('moran-n');
+  const moranPWrapEl = $('moran-p-wrap'), moranNWrapEl = $('moran-n-wrap');
   const speedHintEl = $('speed-hint'), explainPanel = $('explain-panel');
   const feedbackPillEl = $('feedback-pill'), feedbackPrecisionEl = $('feedback-precision');
   const priorityListEl = $('priority-list'), prioritySummaryEl = $('priority-summary');
@@ -1043,7 +1044,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       return;
     }
     priorityListEl.innerHTML =
-      `<div class="priority-row head"><div>Rank</div><div>Tower</div><div style="text-align:right">Estimated people within 2 km</div><div class="priority-severity">SIMULATED severity</div></div>` +
+      `<div class="priority-row head"><div>Rank</div><div>Tower</div><div style="text-align:right">Estimated people within 2 km</div><div class="priority-severity">Latest reading (SIMULATED)</div></div>` +
       rows.map(row => {
         const unavailable = row.pop_2km === null || row.pop_2km === undefined;
         const population = unavailable ? 'population unavailable' : Math.round(row.pop_2km).toLocaleString();
@@ -1626,14 +1627,19 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       if(d.computable){
         moranIEl.textContent = d.global_moran_i.toFixed(3);
         moranPEl.textContent = d.global_p_value.toFixed(3) + (d.global_p_value < 0.05 ? ' *' : '');
+        if(moranPWrapEl) moranPWrapEl.hidden = false;
+        if(moranNWrapEl) moranNWrapEl.hidden = false;
+        moranNEl.textContent = `${d.n_towers_scored}/${d.min_required}`;
         d.per_tower.forEach(t => lisaByTower.set(t.tower_key, {
           quadrant: t.lisa_quadrant, label: t.lisa_label, p_value: t.p_value, significant: t.significant,
         }));
       } else {
-        moranIEl.textContent = '—';
-        moranPEl.textContent = '—';
+        // Plain, specific reason instead of a bare "--" -- an operator can tell at a glance
+        // whether this is "not enough data yet" (transient) or something else.
+        moranIEl.textContent = `Needs at least ${d.min_required} towers scored (${d.n_towers_scored} so far)`;
+        if(moranPWrapEl) moranPWrapEl.hidden = true;
+        if(moranNWrapEl) moranNWrapEl.hidden = true;
       }
-      moranNEl.textContent = `${d.n_towers_scored}/${d.min_required}`;
       renderLiveMap();
     }catch(err){ /* transient poll failure -- leave last-known values on screen */ }
   }
