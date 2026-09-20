@@ -10,6 +10,8 @@ COPY requirements.txt requirements-api.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-api.txt
 
 COPY extract_features.py sanity_check.py train_baseline_model.py train_improved_model.py ./
+COPY build_feature_baseline.py ./
+COPY examples ./examples
 COPY api ./api
 COPY processed ./processed
 COPY spatial_raw ./spatial_raw
@@ -18,6 +20,11 @@ COPY syncguard_interactive_summary.html ./
 # Baked into the image at build time -- models/model.joblib (+ model_baseline.joblib) and
 # both *_report.md files are produced here, not committed to git (see .gitignore).
 RUN python train_baseline_model.py && python train_improved_model.py
+
+# Auth is OPT-IN: with SYNCGUARD_API_KEY unset (the default here) every route is open and
+# `docker compose up` needs no configuration at all. Set it in docker-compose.yml or the
+# environment to require a key. See README.md and api/auth.py.
+ENV SYNCGUARD_LOG_LEVEL=INFO
 
 RUN mkdir -p /app/data
 VOLUME ["/app/data"]

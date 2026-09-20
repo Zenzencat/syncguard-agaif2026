@@ -62,6 +62,22 @@ class TelemetryInput(FeatureVector):
     tower_site_id: Optional[str] = Field(default=None, description="Real Telkomsel site_id (see spatial_raw tower CSV) if the caller knows which tower this reading is from -- enables live spatial correlation for this event. Omit if unknown.")
 
 
+class InputWarning(BaseModel):
+    """One feature outside the training baseline's widened range.
+
+    Advisory only. The value was scored exactly as it would have been without this check --
+    out-of-range input may be the very anomaly the detector exists to catch, so rejecting it
+    would suppress detections. See api/plausibility.py.
+    """
+    feature: str
+    value: Optional[float] = Field(default=None, description="The submitted value, or null if it was not a finite number")
+    direction: str = Field(description="'below_baseline_range' | 'above_baseline_range' | 'not_finite'")
+    bound_low: float
+    bound_high: float
+    baseline_median: float
+    message: str
+
+
 class TopFeature(BaseModel):
     feature: str
     shap_value: float = Field(description="Signed SHAP contribution to the attack-class probability -- positive pushes toward attack, negative toward clean")
@@ -79,6 +95,8 @@ class ScoreResponse(BaseModel):
     tower: Optional[dict] = Field(default=None, description="The real tower this event was attributed to, if any")
     correlation: Optional[dict] = Field(default=None, description="Live distance-weighted correlation against real neighboring towers -- see api/spatial.py")
     top_features: list[TopFeature] = Field(default_factory=list, description="Top SHAP-ranked features for this prediction -- see SHAP_EXPLAINABILITY.md. Always computed for /score.")
+    model_tag: Optional[str] = Field(default=None, description="Model version tag: version string + model file hash + threshold + feature-list hash. Identifies exactly which artifact produced this score -- see GET /health.")
+    input_warnings: list[InputWarning] = Field(default_factory=list, description="Features outside the training baseline range. NEVER rejects input -- the score above was produced anyway. An empty list does NOT mean the input is correct; see api/plausibility.py for what this check does and does not catch.")
 
 
 class ExplainResponse(BaseModel):
@@ -93,6 +111,14 @@ class HealthResponse(BaseModel):
     model_version: Optional[str] = None
     towers_loaded: int = 0
     replay_running: bool = False
+
+    # --- added in Phase 3 (ops hardening) ---
+    model_tag: Optional[str] = Field(default=None, description="version string + model file hash + threshold + feature-list hash. Changes whenever anything affecting a prediction changes.")
+    model_info: Optional[dict] = Field(default=None, description="Full model version tag: file name, sha256, threshold, feature count, feature-list hash, the 23 feature names, and the severity floor/ceiling.")
+    auth_required: bool = Field(default=False, description="True when SYNCGUARD_API_KEY is set and non-health routes require a key. /health itself is always exempt so probes need no secret.")
+    auth_key_is_weak: Optional[bool] = Field(default=None, description="True when a configured key is shorter than the recommended minimum. Never reveals the key or its length.")
+    baseline_loaded: bool = Field(default=False, description="Whether the training-distribution baseline (api/feature_baseline.json) is available for input warnings and /drift.")
+    baseline_generated_at: Optional[str] = None
 
 
 class LisaTower(BaseModel):
@@ -165,6 +191,7 @@ class IngestResult(BaseModel):
     duplicate: bool = Field(default=False, description="True if (tower_id, timestamp) was already ingested -- not re-scored, not re-persisted; event_id points at the original.")
     out_of_order: bool = Field(default=False, description="True if this observation's timestamp is older than the newest already ingested for this tower. Still scored and persisted; deliberately NOT fed to per-tower hysteresis (see INGESTION_CONTRACT.md).")
     explained: bool = Field(default=False, description="True if SHAP was computed inline. Large batches skip it for latency; GET /events/{id}/explain computes it lazily on demand.")
+    input_warnings: list[InputWarning] = Field(default_factory=list, description="Features outside the training baseline range for THIS observation. Advisory only -- it was scored anyway. See api/plausibility.py.")
 
 
 class IngestResponse(BaseModel):
@@ -176,6 +203,8 @@ class IngestResponse(BaseModel):
     reordered_in_batch: int = Field(description="How many observations were submitted out of ascending timestamp order relative to an earlier observation for the same tower in the same batch. Not an error: the batch is sorted by timestamp before scoring so per-tower hysteresis sees a monotonic sequence. Reported so a caller can see its feed is shuffled.")
     alerts: int = Field(description="Of the scored observations, how many left their tower in alert_state='alerting'")
     live_explain: bool = Field(description="Whether SHAP was computed inline for this batch (batch size <= the inline-explain limit)")
+    input_warning_count: int = Field(default=0, description="Total input plausibility warnings across the batch. Advisory only -- nothing was rejected because of them.")
+    model_tag: Optional[str] = Field(default=None, description="Model version tag that scored this batch -- see GET /health.")
     results: list[IngestResult]
 
 

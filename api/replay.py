@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from api.hysteresis import AlertHysteresis
+from api.observability import METRICS
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "processed" / "syncguard_features.parquet"
 DEFAULT_SCENARIO = {"attack_type": "Spoofing", "scenario_id": "2.1.1"}  # same scenario demo_prediction_visualization.py uses
@@ -196,6 +197,12 @@ class ReplayManager:
                     "top_features": top_features,
                     "alert_state": alert_state,
                 })
+
+                METRICS.inc("syncguard_scores_total",
+                            {"path": "/replay", "predicted_label": result["predicted_label"]})
+                METRICS.inc("syncguard_events_persisted_total", {"source": "replay"})
+                if alert_state == "alerting":
+                    METRICS.inc("syncguard_alerts_total", {"source": "replay"})
 
                 self._rows_replayed += 1
                 real_time = row["real_time"]

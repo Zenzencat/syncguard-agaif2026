@@ -8,6 +8,20 @@ services:
       - "8000:8000"
     volumes:
       - syncguard-data:/app/data   # persists the SQLite scored_events DB across restarts
+    environment:
+      # Authentication is OPT-IN and is OFF here on purpose: `docker compose up --build` must
+      # work with no configuration, which is the whole point of the one-command demo path.
+      #
+      # To require an API key, uncomment the line below (or export SYNCGUARD_API_KEY in your
+      # shell -- compose substitutes it). Every route then needs the key except /health,
+      # /dashboard and the API docs. The dashboard will show a key field; enter the key and
+      # click Connect. See README.md "Authentication (opt-in)" and api/auth.py.
+      #
+      # - SYNCGUARD_API_KEY=${SYNCGUARD_API_KEY:?set a long random string}
+      #
+      # Behind TLS, also set:
+      # - SYNCGUARD_COOKIE_SECURE=1
+      - SYNCGUARD_LOG_LEVEL=INFO
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
       interval: 15s

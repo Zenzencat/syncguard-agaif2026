@@ -1,4 +1,4 @@
-.PHONY: setup setup-dev test train train-baseline train-improved serve replay-demo ingest-demo package verify-package clean
+.PHONY: setup setup-dev test train train-baseline train-improved serve replay-demo ingest-demo baseline package verify-package clean
 
 PY ?= python
 
@@ -32,6 +32,11 @@ replay-demo:
 # Convenience: send a sample POST /ingest batch to the running API and print the alerts.
 ingest-demo:
 	$(PY) examples/ingest_client.py
+
+# Regenerate api/feature_baseline.json (input plausibility bounds + PSI bins) from the
+# training feature table. Committed output -- only needs rerunning if the model changes.
+baseline:
+	$(PY) build_feature_baseline.py
 
 # Build syncguard_source.zip from `git ls-files` (tracked files only, so .env, *.db and
 # data/external/ cannot get in) and then verify the result against the repo.

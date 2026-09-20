@@ -6,6 +6,7 @@ see ROBUSTNESS_NOTES.md); falls back to models/model_baseline.joblib if that's a
 been trained yet, with a loud warning, so `make train-baseline` alone is still enough to get
 the service running.
 """
+import hashlib
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -55,6 +56,26 @@ class ModelService:
         self.severity_ceiling: float = float(artifact["severity_ceiling"])
         self.model_version: str = artifact.get("model_version", "unknown")
 
+        # ---- Model version tag -------------------------------------------------
+        # "model_version" alone is a hand-set string in the training script; two different
+        # artifacts can carry the same one. The tag below is derived from the artifact
+        # itself, so it changes whenever anything that affects a prediction changes:
+        #   file_sha256   -- the exact bytes of the loaded .joblib
+        #   threshold     -- the tuned decision threshold actually in use
+        #   feature_sha256-- hash of the ordered feature list, so a reordering or a renamed
+        #                    feature is visible even at an identical file size
+        # It is reported by GET /health and on every scoring response, and stamped on
+        # /metrics, so a number quoted from this service can always be traced to the artifact
+        # that produced it.
+        self.model_sha256: str = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.feature_list_sha256: str = hashlib.sha256(
+            "\n".join(self.feature_cols).encode("utf-8")
+        ).hexdigest()
+        self.model_tag: str = (
+            f"{self.model_version}+{self.model_sha256[:12]}"
+            f"+t{self.decision_threshold:.4f}+f{self.feature_list_sha256[:8]}"
+        )
+
         # SHAP explainability (see SHAP_EXPLAINABILITY.md). TreeExplainer needs the raw
         # RandomForestClassifier, not the sklearn Pipeline -- it doesn't understand Pipeline
         # objects, so imputation has to happen manually before both predict_proba and
@@ -66,6 +87,22 @@ class ModelService:
         self._imputer = self.pipeline.named_steps["impute"]
         self._rf = rf
         self._explainer = shap.TreeExplainer(self._rf, feature_perturbation="tree_path_dependent")
+
+    @property
+    def version_info(self) -> dict:
+        """The full model version tag, as reported by /health and every scoring response."""
+        return {
+            "model_tag": self.model_tag,
+            "model_version": self.model_version,
+            "model_file": self.model_path.name,
+            "model_sha256": self.model_sha256,
+            "decision_threshold": self.decision_threshold,
+            "n_features": len(self.feature_cols),
+            "feature_list_sha256": self.feature_list_sha256,
+            "feature_cols": list(self.feature_cols),
+            "severity_floor": self.severity_floor,
+            "severity_ceiling": self.severity_ceiling,
+        }
 
     def score(self, features: dict) -> dict:
         row = {c: features.get(c) for c in self.feature_cols}
@@ -82,6 +119,7 @@ class ModelService:
             "predicted_label": predicted_label,
             "decision_threshold": self.decision_threshold,
             "model_version": self.model_version,
+            "model_tag": self.model_tag,
         }
 
     def explain(self, features: dict, top_n: int = TOP_FEATURES_N) -> list[dict]:

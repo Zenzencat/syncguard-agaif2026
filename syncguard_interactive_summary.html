@@ -330,7 +330,10 @@
         <span class="conn-advanced" id="conn-advanced" hidden>
           <label for="api-base">API base</label>
           <input type="text" id="api-base" value="">
-          <button class="btn" id="btn-connect">Connect</button>
+          <input class="ctl" id="api-key" type="password" placeholder="API key (only if required)"
+               autocomplete="off" spellcheck="false" style="display:none; width:180px;"
+               title="Sent once to POST /auth/session, which returns an HttpOnly session cookie. The key is never placed in a URL and never stored in localStorage." />
+        <button class="btn" id="btn-connect">Connect</button>
         </span>
       </div>
       <div class="controls">
@@ -682,6 +685,39 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   const LIVE_EXPLAIN_MAX_SPEED = 20; // must match api/replay.py's LIVE_EXPLAIN_MAX_SPEED
 
   function base(){ return apiBaseInput.value.replace(/\/$/, ''); }
+
+  // ---------- API-key auth (opt-in; see api/auth.py) ----------
+  // Auth exists only when the service was started with SYNCGUARD_API_KEY set. /health says
+  // so, and this page adapts: with auth off the key field stays hidden and nothing changes.
+  //
+  // Every request below sends credentials:'include' so the session cookie travels, and
+  // EventSource is opened withCredentials for the same reason -- EventSource cannot send an
+  // X-API-Key header, which is exactly why the cookie exists. The key itself is POSTed once
+  // to /auth/session and is never put in a URL (it would leak into access logs, proxy logs,
+  // browser history and Referer headers) and never written to localStorage.
+  const apiKeyInput = $('api-key');
+  let authRequired = false;
+
+  // credentials:'include' on every call, so one code path works in both modes.
+  function api(path, options){
+    return fetch(base() + path, Object.assign({credentials: 'include'}, options || {}));
+  }
+
+  async function establishSession(){
+    // Exchange the typed key for an HttpOnly session cookie. Returns true when the browser
+    // is authenticated (or when auth is switched off entirely).
+    const key = apiKeyInput.value.trim();
+    if(!key) return false;
+    const res = await api('/auth/session', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-API-Key': key},
+      body: JSON.stringify({api_key: key}),
+    });
+    if(!res.ok) return false;
+    // Deliberately NOT persisted: the key stays in this input for this page load only.
+    // The HttpOnly cookie the server just set is what carries the session from here.
+    return true;
+  }
   function setStatus(kind, text){
     statusPill.className = 'pill ' + kind;
     statusText.textContent = text;
@@ -833,7 +869,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       stateEl.classList.remove('err');
       stateEl.textContent = 'saving…';
       try{
-        const res = await fetch(`${base()}/events/${eventId}/feedback`, {
+        const res = await api(`/events/${eventId}/feedback`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({label, analyst: analystName()}),
@@ -857,7 +893,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     const cached = feedbackByEvent.get(eventId);
     if(cached) paintFeedback(cached);
     try{
-      const record = await fetch(`${base()}/events/${eventId}/feedback`).then(r => {
+      const record = await api(`/events/${eventId}/feedback`).then(r => {
         if(!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       });
@@ -883,7 +919,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   async function refreshFeedbackSummary(){
     if(!feedbackPillEl) return;
     try{
-      const s = await fetch(base() + '/feedback/summary').then(r => r.json());
+      const s = await api('/feedback/summary').then(r => r.json());
       feedbackPillEl.textContent = `${s.confirmed} confirmed · ${s.dismissed} dismissed`;
       // The denominator is labeled events the model called 'attack' -- NOT all labeled
       // events. Labeling a clean-predicted event leaves this null, so the empty-state copy
@@ -919,7 +955,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     document.getElementById('explain-btn').addEventListener('click', async () => {
       explainPanel.innerHTML = `<span class="ph">Computing SHAP explanation…</span>`;
       try{
-        const d = await fetch(`${base()}/events/${eventId}/explain`).then(r => {
+        const d = await api(`/events/${eventId}/explain`).then(r => {
           if(!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
         });
@@ -934,7 +970,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
 
   async function fetchAutocorrelation(){
     try{
-      const d = await fetch(base() + '/spatial/autocorrelation').then(r => r.json());
+      const d = await api('/spatial/autocorrelation').then(r => r.json());
       lisaByTower.clear();
       if(d.computable){
         moranIEl.textContent = d.global_moran_i.toFixed(3);
@@ -955,22 +991,48 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     try{ localStorage.setItem('syncguard_api_base', apiBaseInput.value); }catch(e){}
     setStatus('pending', 'connecting…');
     try{
+      // /health is always exempt from auth, so this works before any key is supplied and
+      // is how the page discovers whether a key is needed at all.
       const health = await fetch(base() + '/health').then(r => r.json());
+      authRequired = !!health.auth_required;
+      apiKeyInput.style.display = authRequired ? '' : 'none';
+
       if(!health.model_loaded){
         setStatus('bad', 'API up, but no model loaded (run `make train`)');
         btnStart.disabled = true;
         return;
       }
-      setStatus('ok', `connected · ${health.model_version} · ${health.towers_loaded} towers`);
+
+      if(authRequired){
+        // Probe a protected route; if the existing cookie is still valid we skip the prompt.
+        const probe = await api('/towers');
+        if(probe.status === 401){
+          if(!apiKeyInput.value.trim()){
+            setStatus('bad', 'this API requires a key — enter it and click Connect');
+            apiKeyInput.focus();
+            btnStart.disabled = true;
+            return;
+          }
+          if(!await establishSession()){
+            setStatus('bad', 'API key rejected');
+            apiKeyInput.focus();
+            btnStart.disabled = true;
+            return;
+          }
+        }
+      }
+
+      setStatus('ok', `connected · ${health.model_version} · ${health.towers_loaded} towers` +
+                     (authRequired ? ' · authenticated' : ''));
       btnStart.disabled = false;
 
-      allTowers = await fetch(base() + '/towers').then(r => r.json());
-      const runs = await fetch(base() + '/replay/runs').then(r => r.json());
+      allTowers = await api('/towers').then(r => r.json());
+      const runs = await api('/replay/runs').then(r => r.json());
       runSelect.innerHTML = '<option value="">(default: 2.1.1 Spoofing)</option>' + runs.map(r =>
         `<option value="${r.run_id}">${r.attack_type} ${r.scenario_id} (${r.rover_state}, ${r.n_rows} rows)</option>`
       ).join('');
 
-      const mapState = await fetch(base() + '/events/map').then(r => r.json());
+      const mapState = await api('/events/map').then(r => r.json());
       mapState.forEach(e => {
         liveSeverity.set(e.tower_site_id, {
           site_id: e.tower_site_id, name: e.tower_site_name, lat: e.tower_lat, lon: e.tower_lon,
@@ -999,7 +1061,10 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
 
   function openStream(){
     if(eventSource) eventSource.close();
-    eventSource = new EventSource(base() + '/stream/events');
+    // withCredentials sends the HttpOnly session cookie established above. EventSource
+    // cannot send an X-API-Key header -- that limitation is the entire reason /auth/session
+    // exists rather than a ?api_key= query parameter. See api/auth.py.
+    eventSource = new EventSource(base() + '/stream/events', {withCredentials: true});
     eventSource.onmessage = (msg) => {
       const ev = JSON.parse(msg.data);
       if(!ev.tower) return;
@@ -1026,6 +1091,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     const a = $('feedback-export');
     if(a) a.href = base() + '/feedback/export';
   }
+
+  // Enter in the key field is the same as clicking Connect.
+  apiKeyInput.addEventListener('keydown', (e) => { if(e.key === 'Enter') connect(); });
   apiBaseInput.addEventListener('change', syncExportLink);
   syncExportLink();
 
@@ -1033,12 +1101,12 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   btnStart.addEventListener('click', async () => {
     const params = new URLSearchParams({speed: speedSelect.value});
     if(runSelect.value) params.set('run_id', runSelect.value);
-    const res = await fetch(`${base()}/replay/start?${params}`, {method:'POST'});
+    const res = await api(`/replay/start?${params}`, {method:'POST'});
     if(res.ok){ btnStart.disabled = true; btnStop.disabled = false; }
     else { const err = await res.json().catch(()=>({detail:res.statusText})); setStatus('bad', err.detail); }
   });
   btnStop.addEventListener('click', async () => {
-    await fetch(`${base()}/replay/stop`, {method:'POST'});
+    await api('/replay/stop', {method:'POST'});
     btnStart.disabled = false; btnStop.disabled = true;
   });
 

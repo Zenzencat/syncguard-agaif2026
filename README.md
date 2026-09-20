@@ -54,6 +54,9 @@ Not just a model — a running service with an evidence trail:
 | `POST` | `/replay/start?run_id=&speed=` | Start streaming replay |
 | `POST` | `/replay/stop` · `GET` `/replay/status` | Stop / status (incl. `live_explain`, `alert_state`) |
 | `GET` | `/stream/events` | Server-sent-events feed of scored replay events |
+| `GET` | `/metrics` | Prometheus text format — request counts, latency histogram, score/alert/warning counters |
+| `GET` | `/drift` | Per-feature PSI of recent inputs vs the training baseline (**expected to drift** — see below) |
+| `POST` | `/auth/session` · `/auth/logout` | Exchange an API key for a session cookie (only when auth is on — see below) |
 | `GET` | `/dashboard` | Serves the interactive HTML |
 
 ---
@@ -159,11 +162,106 @@ curl -s localhost:8000/feedback/export -o feedback.csv
 > a self-selected non-random subset, and is **not** the detector's field precision. Read
 > **[FEEDBACK_LOOP.md](FEEDBACK_LOOP.md)** before describing this feature anywhere.
 
+### Authentication (opt-in)
+
+**Auth is off unless you turn it on.** With `SYNCGUARD_API_KEY` unset — the default, and what
+`docker compose up` does with no configuration — every route is open and nothing prompts for
+a key. Set the variable and every route except the exemptions below requires it.
+
+```bash
+# open (default): nothing to configure
+docker compose up --build
+
+# authenticated
+SYNCGUARD_API_KEY='a-long-random-string' make serve
+
+curl -s localhost:8000/towers -H 'X-API-Key: a-long-random-string'
+curl -s localhost:8000/towers -H 'Authorization: Bearer a-long-random-string'
+```
+
+Comparison is constant-time; the key is never logged, never echoed in an error, and never
+accepted in a URL. **Exempt routes:** `/health` (so container healthchecks and uptime probes
+need no secret — it reports liveness and the model tag, no event data), `/` and `/dashboard`
+(a static shell that ships no key and cannot act without one), and `/docs` / `/openapi.json`.
+
+**The live event stream and the dashboard.** `EventSource` cannot send custom headers, so
+`/stream/events` could not use `X-API-Key`. Exempting it was rejected — it pushes the system's
+actual output. A `?api_key=` query token was also rejected, because URLs leak into access logs,
+proxy logs, browser history and `Referer` headers. Instead the dashboard POSTs the key once to
+`/auth/session` and receives an opaque `HttpOnly; SameSite=Strict` cookie, which the browser
+attaches to the stream automatically. The key never reaches a URL, JavaScript, or
+`localStorage`. When auth is on, the dashboard shows a key field; enter the key and click
+Connect.
+
+Costs of that choice, stated rather than buried: sessions are **in-process** and are lost on
+restart (the dashboard re-prompts); cookies cannot coexist with wildcard CORS, so a dashboard
+pointed at a *different* API host needs `SYNCGUARD_CORS_ORIGINS` set; and the cookie is not
+`Secure` by default because the demo runs on plain-HTTP localhost — set
+`SYNCGUARD_COOKIE_SECURE=1` behind TLS. Full reasoning in [`api/auth.py`](api/auth.py).
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SYNCGUARD_API_KEY` | *(unset)* | Set to enable auth. Unset = every route open. |
+| `SYNCGUARD_CORS_ORIGINS` | *(empty)* | Comma-separated origins allowed to send credentials, when auth is on. |
+| `SYNCGUARD_COOKIE_SECURE` | `0` | Set to `1` behind TLS. |
+| `SYNCGUARD_LOG_LEVEL` | `INFO` | Log level for the JSON logs. |
+| `SYNCGUARD_DB_PATH` | `data/syncguard.db` | Override the SQLite location. |
+
+### Model version tag
+
+Every scoring response and `GET /health` carry a tag derived from the artifact itself —
+`model_version + sha256(model file)[:12] + threshold + sha256(feature list)[:8]` — so any
+number quoted from a running service can be traced to the exact model that produced it. It is
+also a `/metrics` gauge label.
+
+### Input plausibility warnings
+
+`/score` and `/ingest` responses carry an `input_warnings` list for features outside the
+training baseline's range (p0.1–p99.9 widened by 25% on each side; baseline in
+[`api/feature_baseline.json`](api/feature_baseline.json), regenerate with `python
+build_feature_baseline.py`).
+
+**Warnings never reject input** — out-of-range values may be exactly the anomaly the detector
+exists to catch. They exist because a hand-written, physically sensible-looking vector
+(`pDOP` 1.4 instead of ~0.01) scores `attack` at p=0.60 with no error at all. **The guard
+catches 1 of the 4 mis-scaled fields in that vector** — `hAcc`/`vAcc` cannot be flagged
+because the training baseline itself contains the u-blox invalid sentinel (2³²−1), and
+`numSV`/`n_sats_l1` at 18 sit inside wide ranges. `input_warnings: []` does **not** mean the
+input is correct. See [`api/plausibility.py`](api/plausibility.py).
+
+### Observability
+
+Structured JSON logs on stdout, one object per line, with a request id propagated from (or
+returned in) `X-Request-ID`. `/metrics` is Prometheus text format: request counts and a
+latency histogram by **route template** (not concrete paths, so event ids don't explode
+cardinality), plus score, alert, input-warning, ingest-outcome, feedback and auth-failure
+counters.
+
+### Drift
+
+`GET /drift` reports per-feature PSI of recently scored inputs against the training baseline.
+**The baseline is Jammertest 2024 — a Norwegian test range, one receiver.** Real ASEAN telecom
+input is *expected* to drift from it, so a high PSI is not evidence of a fault; it is as
+consistent with "this is different infrastructure" as with "something changed". The response
+says so inline. Conventional PSI cut points (0.10 minor / 0.25 major) are used — they are not
+derived from this project's data.
+
+### Assumptions
+
+**[ASSUMPTIONS_PRODUCTION.md](ASSUMPTIONS_PRODUCTION.md)** lists every unvalidated assumption
+in the system — data source, base-station timing generalization, holdover behaviour, tower
+coordinates real vs event layer simulated, and the known gaps — each marked validated,
+partially validated, unvalidated, or known-false. Read it before making any claim about what
+this system has been shown to do.
+
 ### Tests
 
 ```bash
-python -m pytest            # 66 tests
+python -m pytest            # 66 + Phase 3 ops tests
 ```
+
+The auth tests start real uvicorn subprocesses in both modes (key set and key unset), so the
+`docker compose up` posture is tested as such rather than simulated.
 
 ### Packaging
 

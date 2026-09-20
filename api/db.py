@@ -254,6 +254,30 @@ class EventStore:
             ).fetchone()
         return row[0] if row and row[0] is not None else None
 
+    def recent_feature_rows(self, limit: int = 1000, source: str | None = None) -> list[dict]:
+        """Stored feature vectors from the most recent scored events -- the live sample
+        GET /drift compares against the training baseline.
+
+        Rows with no stored features (scored before features_json existed) are skipped rather
+        than counted as empty, so they cannot dilute a distribution.
+        """
+        sql = ("SELECT features_json FROM scored_events WHERE features_json IS NOT NULL")
+        params: list = []
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        out = []
+        for r in rows:
+            try:
+                out.append(json.loads(r["features_json"]))
+            except (TypeError, ValueError):
+                continue
+        return out
+
     # ---------------------------------------------------------------- feedback
     # Analyst confirm/dismiss. These store labels; nothing reads them back into the model.
     # See FEEDBACK_LOOP.md -- there is no closed loop and no retraining anywhere in this repo.

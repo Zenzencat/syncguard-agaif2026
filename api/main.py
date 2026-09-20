@@ -10,13 +10,16 @@ import asyncio
 import csv
 import io
 import json
+import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
+                               RedirectResponse, Response, StreamingResponse)
 
 from api.schemas import (TelemetryInput, ScoreResponse, HealthResponse, AutocorrelationResponse,
                          ExplainResponse, IngestBatch, IngestResponse, FeedbackRequest,
@@ -27,6 +30,10 @@ from api.spatial import load_towers, TowerAttributor, LiveCorrelationEngine
 from api.spatial_stats import compute_autocorrelation
 from api.replay import ReplayManager, EventBus, list_run_ids
 from api.ingest import IngestService, UnknownTowerError
+from api.auth import ApiKeyAuth, SESSION_COOKIE, API_KEY_HEADER
+from api.observability import (METRICS, REQUEST_ID_HEADER, configure_logging,
+                               new_request_id, request_id_var)
+from api.plausibility import FeatureBaseline, BaselineUnavailable, PSI_MINOR, PSI_MAJOR
 
 # Attached verbatim to every /feedback/summary response. The numbers are real, but the
 # population they describe is chosen by analysts, not sampled -- so they are not an estimate
@@ -43,6 +50,17 @@ PRECISION_CAVEAT = (
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_PATH = REPO_ROOT / "syncguard_interactive_summary.html"
 
+log = configure_logging()
+
+# Auth is OPT-IN: this is disabled unless SYNCGUARD_API_KEY is set. With it unset, every
+# route behaves exactly as it did before Phase 3 and `docker compose up` needs no config.
+# See api/auth.py, including why /stream/events uses a cookie rather than a query token.
+AUTH = ApiKeyAuth()
+
+# Number of most-recent scored events GET /drift samples by default.
+DRIFT_DEFAULT_SAMPLE = 1000
+DRIFT_MAX_SAMPLE = 20000
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,6 +72,14 @@ async def lifespan(app: FastAPI):
         print(f"[startup] {e}")
         app.state.model_service = None
 
+    try:
+        app.state.baseline = FeatureBaseline()
+    except BaselineUnavailable as e:
+        # Not fatal: input warnings and /drift degrade to "unavailable", everything else
+        # works. Regenerate with `python build_feature_baseline.py`.
+        log.warning("feature baseline unavailable", extra={"error": str(e)})
+        app.state.baseline = None
+
     app.state.event_store = EventStore()
     towers = load_towers()
     app.state.towers = towers
@@ -63,11 +89,41 @@ async def lifespan(app: FastAPI):
     app.state.ingest_service = IngestService(
         app.state.model_service, app.state.event_store, towers,
         app.state.correlation_engine, app.state.event_bus,
+        baseline=app.state.baseline,
     ) if app.state.model_service else None
     app.state.replay_manager = ReplayManager(
         app.state.model_service, app.state.event_store, app.state.tower_attributor,
         app.state.correlation_engine, app.state.event_bus,
     ) if app.state.model_service else None
+
+    ms = app.state.model_service
+    if ms is not None:
+        METRICS.set_gauge("syncguard_model_info", 1, {
+            "model_tag": ms.model_tag,
+            "model_version": ms.model_version,
+            "model_sha256_12": ms.model_sha256[:12],
+            "decision_threshold": f"{ms.decision_threshold:.4f}",
+            "n_features": str(len(ms.feature_cols)),
+        })
+    METRICS.set_gauge("syncguard_build_info", 1, {
+        "service": "syncguard",
+        "auth_enabled": str(AUTH.enabled).lower(),
+        "baseline_loaded": str(app.state.baseline is not None).lower(),
+    })
+    log.info("startup complete", extra={
+        "model_loaded": ms is not None,
+        "model_tag": ms.model_tag if ms else None,
+        "towers": len(app.state.towers),
+        "auth_enabled": AUTH.enabled,          # never the key itself
+        "auth_key_is_weak": AUTH.weak_key or None,
+        "baseline_loaded": app.state.baseline is not None,
+    })
+    if AUTH.weak_key:
+        log.warning("SYNCGUARD_API_KEY is shorter than the recommended minimum "
+                    "(16 characters). Auth is active but the key is weak.")
+    if not AUTH.enabled:
+        log.info("SYNCGUARD_API_KEY is not set -- authentication is DISABLED and every "
+                 "route is open. This is the default so the demo path needs no config.")
 
     yield
 
@@ -83,9 +139,113 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
-)
+# CORS posture depends on whether auth is on, because the two cannot be configured the same
+# way. A browser refuses to send credentials (the session cookie /stream/events needs) to an
+# origin whose Access-Control-Allow-Origin is "*", so wildcard CORS and cookie auth are
+# mutually exclusive -- see api/auth.py's SSE section.
+#
+#   auth off  -> wildcard, no credentials. Exactly the pre-Phase-3 behaviour.
+#   auth on   -> only the origins named in SYNCGUARD_CORS_ORIGINS (comma-separated), with
+#                credentials allowed. The default is an empty list, which is correct for the
+#                normal case: the dashboard is served by this same service, so its requests
+#                are same-origin and never hit CORS at all.
+_CORS_ORIGINS = [o.strip() for o in os.environ.get("SYNCGUARD_CORS_ORIGINS", "").split(",")
+                 if o.strip()]
+if AUTH.enabled:
+    app.add_middleware(
+        CORSMiddleware, allow_origins=_CORS_ORIGINS, allow_credentials=True,
+        allow_methods=["*"], allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    )
+
+
+def _route_template(request: Request) -> str:
+    """The matched route's path template ("/events/{event_id}/explain"), not the concrete
+    path. Metrics labelled with concrete paths would grow one time series per event id and
+    blow up the registry's cardinality."""
+    route = request.scope.get("route")
+    return getattr(route, "path", None) or "unmatched"
+
+
+@app.middleware("http")
+async def observability_and_auth(request: Request, call_next):
+    """Assigns a request id, enforces auth (when enabled), records metrics, and emits one
+    structured log line per request.
+
+    Nothing here logs headers, cookies or bodies, so a credential cannot reach a log line.
+    """
+    incoming = request.headers.get(REQUEST_ID_HEADER)
+    request_id = (incoming or new_request_id())[:64]
+    token = request_id_var.set(request_id)
+    started = time.perf_counter()
+    path = request.url.path
+
+    try:
+        if not AUTH.authorize(path, request.headers, request.cookies):
+            presented = (AUTH.extract_key(request.headers) is not None
+                         or SESSION_COOKIE in request.cookies)
+            reason = "invalid_credential" if presented else "missing_credential"
+            METRICS.inc("syncguard_auth_failures_total", {"reason": reason})
+            # Logged without any part of the credential -- only whether one was presented.
+            log.warning("auth rejected", extra={"path": path, "method": request.method,
+                                                "reason": reason})
+            response = JSONResponse(
+                status_code=401,
+                content={"detail": f"API key required. Send it as the {API_KEY_HEADER} "
+                                   f"header, or as 'Authorization: Bearer <key>'. Browsers "
+                                   f"using the live event stream should POST the key to "
+                                   f"/auth/session first -- see api/auth.py."},
+                headers={"WWW-Authenticate": f'ApiKey realm="syncguard", header="{API_KEY_HEADER}"'},
+            )
+        else:
+            response = await call_next(request)
+
+        duration = time.perf_counter() - started
+        template = _route_template(request)
+        METRICS.inc("syncguard_requests_total", {
+            "method": request.method, "path": template, "status": str(response.status_code),
+        })
+        METRICS.observe("syncguard_request_duration_seconds", duration, {
+            "method": request.method, "path": template,
+        })
+        # /metrics scrapes and the SSE stream would otherwise dominate the log at INFO.
+        if path not in ("/metrics", "/stream/events"):
+            log.info("request", extra={
+                "method": request.method, "path": path, "route": template,
+                "status": response.status_code, "duration_ms": round(duration * 1000, 2),
+            })
+        response.headers[REQUEST_ID_HEADER] = request_id
+        return response
+    except Exception:
+        duration = time.perf_counter() - started
+        METRICS.inc("syncguard_requests_total", {
+            "method": request.method, "path": _route_template(request), "status": "500",
+        })
+        log.exception("unhandled error", extra={
+            "method": request.method, "path": path,
+            "duration_ms": round(duration * 1000, 2),
+        })
+        raise
+    finally:
+        request_id_var.reset(token)
+
+
+def _input_warnings(app_: FastAPI, features: dict) -> list[dict]:
+    """Plausibility check against the training baseline. Advisory: the caller scores the
+    features regardless of what comes back. Returns [] when no baseline is loaded, which is
+    indistinguishable in the response from "nothing was out of range" -- GET /health's
+    baseline_loaded is how a caller tells those apart."""
+    baseline = getattr(app_.state, "baseline", None)
+    if baseline is None:
+        return []
+    warnings = baseline.check(features)
+    for w in warnings:
+        METRICS.inc("syncguard_input_warnings_total",
+                    {"feature": w["feature"], "direction": w["direction"]})
+    return warnings
 
 
 def _require_model(app_: FastAPI) -> ModelService:
@@ -96,21 +256,174 @@ def _require_model(app_: FastAPI) -> ModelService:
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
+    """Liveness plus the model version tag. Always exempt from authentication so a container
+    healthcheck, load balancer or uptime probe needs no secret distributed to it -- it
+    reports no event data, no scores and no telemetry."""
     ms = app.state.model_service
+    baseline = getattr(app.state, "baseline", None)
     return HealthResponse(
         status="ok" if ms else "degraded",
         model_loaded=ms is not None,
         model_version=ms.model_version if ms else None,
         towers_loaded=len(app.state.towers),
         replay_running=bool(app.state.replay_manager and app.state.replay_manager.status["status"] == "running"),
+        model_tag=ms.model_tag if ms else None,
+        model_info=ms.version_info if ms else None,
+        auth_required=AUTH.enabled,
+        auth_key_is_weak=AUTH.weak_key if AUTH.enabled else None,
+        baseline_loaded=baseline is not None,
+        baseline_generated_at=baseline.generated_at if baseline else None,
     )
+
+
+@app.post("/auth/session")
+async def auth_session(request: Request):
+    """Exchange an API key for a short-lived HttpOnly session cookie.
+
+    This exists for one reason: the dashboard's live feed uses EventSource, which cannot send
+    custom headers, and putting the key in the stream URL would leak it into access logs,
+    proxy logs, browser history and Referer headers. The key is sent here once, in a header or
+    a JSON body, and comes back as an opaque random token in a cookie the browser attaches
+    automatically. api/auth.py documents the full tradeoff, including that sessions are
+    in-process and do not survive a restart.
+
+    With auth disabled this is a no-op that reports as much, so the dashboard can call it
+    unconditionally.
+    """
+    if not AUTH.enabled:
+        return {"auth_required": False, "authenticated": True,
+                "detail": "Authentication is disabled (SYNCGUARD_API_KEY is not set)."}
+
+    presented = AUTH.extract_key(request.headers)
+    if not presented:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                presented = body.get("api_key")
+        except Exception:
+            presented = None
+
+    if not AUTH.check_key(presented):
+        METRICS.inc("syncguard_auth_failures_total", {"reason": "session_bad_key"})
+        log.warning("auth session rejected", extra={"path": "/auth/session"})
+        raise HTTPException(401, "Invalid API key.")
+
+    token, ttl = AUTH.sessions.issue()
+    response = JSONResponse({"auth_required": True, "authenticated": True,
+                             "expires_in_seconds": ttl})
+    response.set_cookie(
+        SESSION_COOKIE, token,
+        max_age=ttl,
+        httponly=True,       # unreadable from JavaScript
+        samesite="strict",   # a third-party page cannot ride the session
+        secure=AUTH.cookie_secure,  # off by default for the plain-HTTP localhost demo;
+                                    # set SYNCGUARD_COOKIE_SECURE=1 behind TLS
+        path="/",
+    )
+    log.info("auth session issued", extra={"ttl_seconds": ttl})
+    return response
+
+
+@app.post("/auth/logout")
+async def auth_logout(request: Request):
+    """Revoke this browser's session cookie."""
+    AUTH.sessions.revoke(request.cookies.get(SESSION_COOKIE))
+    response = JSONResponse({"authenticated": False})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus text exposition format.
+
+    Requires the API key when auth is on: it carries no secrets, but request counts, latency
+    and alert volumes are operational information. Unlike EventSource, a Prometheus scraper
+    can send a header, so there is no reason to exempt it.
+    """
+    return PlainTextResponse(METRICS.render(),
+                             media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
+@app.get("/drift")
+async def drift(limit: int = Query(default=DRIFT_DEFAULT_SAMPLE, ge=1, le=DRIFT_MAX_SAMPLE),
+                source: str | None = Query(default=None,
+                                           description="Restrict to one event source: 'ingest', 'replay' or 'api'")):
+    """Per-feature PSI of recently scored inputs against the training baseline.
+
+    **The baseline is Jammertest 2024: a Norwegian test range, one receiver, September 2024.
+    Real ASEAN telecom input is EXPECTED to drift from it.** A high PSI here is therefore not
+    by itself evidence of a fault -- it is the expected reading for genuinely different
+    infrastructure, and it is exactly as consistent with "the model is being asked about data
+    it was never trained on" as with "something changed". Treat it as a prompt to look, never
+    as a verdict. See ASSUMPTIONS_PRODUCTION.md.
+
+    PSI is computed over the baseline's own deciles. Features whose baseline is near-constant
+    (fixType) have no usable binning and are reported as skipped rather than silently
+    dropped. Fewer than 100 live samples for a feature returns no PSI for it, because PSI over
+    10 bins is too noisy to mean anything at that size.
+    """
+    baseline = getattr(app.state, "baseline", None)
+    if baseline is None:
+        raise HTTPException(503, "No feature baseline loaded. Run "
+                                 "`python build_feature_baseline.py` and restart.")
+
+    rows = app.state.event_store.recent_feature_rows(limit=limit, source=source)
+    per_feature, skipped = [], []
+    for name in baseline.features:
+        values = [r.get(name) for r in rows if r.get(name) is not None]
+        result = baseline.psi(name, values)
+        if result is None:
+            skipped.append({
+                "feature": name,
+                "reason": ("baseline near-constant, no usable binning"
+                           if baseline.features[name].get("psi_degenerate")
+                           else f"fewer than 100 live samples ({len(values)})"),
+            })
+        else:
+            per_feature.append(result)
+
+    per_feature.sort(key=lambda r: -r["psi"])
+    n_major = sum(1 for r in per_feature if r["severity"] == "major")
+    n_minor = sum(1 for r in per_feature if r["severity"] == "minor")
+
+    return {
+        "computable": bool(per_feature),
+        "n_events_sampled": len(rows),
+        "source_filter": source,
+        "method": "PSI over the training baseline's deciles; see api/plausibility.py",
+        "thresholds": {"minor": PSI_MINOR, "major": PSI_MAJOR,
+                       "note": "Conventional PSI cut points, not values derived from this "
+                               "project's data."},
+        "baseline": {
+            "generated_at": baseline.generated_at,
+            "n_rows": baseline.n_rows,
+            "n_runs": baseline.n_runs,
+            "provenance": baseline.provenance,
+        },
+        "flagged": n_major > 0 or n_minor > 0,
+        "n_major": n_major,
+        "n_minor": n_minor,
+        "caveat": (
+            "EXPECTED TO DRIFT. The baseline is Norwegian test-range data (Jammertest 2024, "
+            "one receiver). Real ASEAN telecom input is expected to fall outside it, so a "
+            "high PSI here is not evidence of a fault. See ASSUMPTIONS_PRODUCTION.md."
+        ),
+        "per_feature": per_feature,
+        "skipped": skipped,
+    }
 
 
 @app.post("/score", response_model=ScoreResponse)
 async def score(telemetry: TelemetryInput):
     ms = _require_model(app)
     features = telemetry.model_dump(exclude={"receiver_id", "tower_site_id"})
+    # Advisory only, and computed before scoring purely so the two travel together in the
+    # response -- it does not gate the call below. See api/plausibility.py.
+    input_warnings = _input_warnings(app, features)
     result = ms.score(features)
+    METRICS.inc("syncguard_scores_total",
+                {"path": "/score", "predicted_label": result["predicted_label"]})
     top_features = ms.explain(features)  # always computed for /score -- ad-hoc, single-row, latency is imperceptible (see SHAP_EXPLAINABILITY.md)
 
     tower, corr = None, None
@@ -150,7 +463,9 @@ async def score(telemetry: TelemetryInput):
         "top_features": top_features,
     })
 
-    return ScoreResponse(**result, event_id=event_id, tower=tower, correlation=corr, top_features=top_features)
+    METRICS.inc("syncguard_events_persisted_total", {"source": "api"})
+    return ScoreResponse(**result, event_id=event_id, tower=tower, correlation=corr,
+                         top_features=top_features, input_warnings=input_warnings)
 
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -173,9 +488,22 @@ async def ingest(batch: IngestBatch):
     if app.state.ingest_service is None:
         raise HTTPException(503, "No trained model loaded -- run `make train` first, then restart the service.")
     try:
-        return IngestResponse(**await app.state.ingest_service.ingest(batch))
+        result = await app.state.ingest_service.ingest(batch)
     except UnknownTowerError as e:
         raise HTTPException(422, str(e))
+
+    for outcome, count in (("scored", result["scored"]),
+                           ("duplicate", result["duplicates"]),
+                           ("out_of_order", result["out_of_order"])):
+        if count:
+            METRICS.inc("syncguard_ingest_observations_total", {"outcome": outcome}, count)
+    log.info("ingest batch", extra={
+        "batch_id": batch.batch_id, "received": result["received"],
+        "scored": result["scored"], "duplicates": result["duplicates"],
+        "out_of_order": result["out_of_order"], "alerts": result["alerts"],
+        "input_warnings": result["input_warning_count"],
+    })
+    return IngestResponse(**result)
 
 
 @app.get("/towers")
@@ -238,6 +566,14 @@ async def submit_feedback(event_id: int, feedback: FeedbackRequest):
     record = store.upsert_feedback(
         event_id, feedback.label, note=feedback.note, analyst=feedback.analyst
     )
+    METRICS.inc("syncguard_feedback_total", {
+        "label": record["label"],
+        "relabel": str(record["previous_label"] is not None).lower(),
+    })
+    log.info("analyst feedback", extra={
+        "event_id": event_id, "label": record["label"],
+        "previous_label": record["previous_label"], "revision": record["revision"],
+    })
     return FeedbackRecord(**record)
 
 

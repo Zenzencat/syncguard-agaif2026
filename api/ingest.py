@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from api.hysteresis import TowerHysteresisRegistry
+from api.observability import METRICS
 
 # SHAP TreeExplainer costs ~45-55ms/row (exact Tree SHAP over 300 trees -- SHAP_EXPLAINABILITY.md).
 # Same tradeoff replay makes with LIVE_EXPLAIN_MAX_SPEED, applied to batch size instead of
@@ -80,8 +81,13 @@ class UnknownTowerError(ValueError):
 
 class IngestService:
     def __init__(self, model_service, event_store, towers: pd.DataFrame, correlation_engine,
-                 event_bus=None, hysteresis: TowerHysteresisRegistry | None = None):
+                 event_bus=None, hysteresis: TowerHysteresisRegistry | None = None,
+                 baseline=None):
         self._model = model_service
+        # Training-distribution baseline for input plausibility warnings. Optional: when it
+        # is None, warnings are simply absent and scoring is unaffected -- the check never
+        # gates anything. See api/plausibility.py.
+        self._baseline = baseline
         self._store = event_store
         self._towers = towers
         self._correlation = correlation_engine
@@ -149,6 +155,7 @@ class IngestService:
 
         live_explain = len(observations) <= INGEST_LIVE_EXPLAIN_MAX_BATCH
         results, n_scored, n_dup, n_ooo, n_alerts = [], 0, 0, 0, 0
+        n_warnings = 0
 
         for i, (obs, tower) in enumerate(pairs):
             if i and i % YIELD_EVERY == 0:
@@ -172,11 +179,21 @@ class IngestService:
                     "duplicate": True,
                     "out_of_order": False,
                     "explained": existing.get("top_features") is not None,
+                    "input_warnings": [],  # not re-checked; the original was checked once
                 })
                 continue
 
             features = obs.model_dump(exclude={"tower_id", "timestamp"})
+            # Advisory only -- never gates the scoring call below.
+            warnings = self._baseline.check(features) if self._baseline is not None else []
+            for w in warnings:
+                METRICS.inc("syncguard_input_warnings_total",
+                            {"feature": w["feature"], "direction": w["direction"]})
+            n_warnings += len(warnings)
+
             result = self._model.score(features)  # same path as POST /score
+            METRICS.inc("syncguard_scores_total",
+                        {"path": "/ingest", "predicted_label": result["predicted_label"]})
             top_features = self._model.explain(features) if live_explain else None
 
             base = baseline.get(tower_key)
@@ -239,8 +256,10 @@ class IngestService:
                 })
 
             n_scored += 1
+            METRICS.inc("syncguard_events_persisted_total", {"source": "ingest"})
             if alert_state == "alerting":
                 n_alerts += 1
+                METRICS.inc("syncguard_alerts_total", {"source": "ingest"})
 
             results.append({
                 "tower_id": tower_key,
@@ -254,6 +273,7 @@ class IngestService:
                 "duplicate": False,
                 "out_of_order": out_of_order,
                 "explained": top_features is not None,
+                "input_warnings": warnings,
             })
 
         return {
@@ -265,5 +285,7 @@ class IngestService:
             "reordered_in_batch": reordered,
             "alerts": n_alerts,
             "live_explain": live_explain,
+            "input_warning_count": n_warnings,
+            "model_tag": getattr(self._model, "model_tag", None),
             "results": results,
         }
