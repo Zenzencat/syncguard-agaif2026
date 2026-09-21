@@ -169,7 +169,10 @@ sites to prioritize* — a second, clearly-separated data source and simulation 
 **The line between what is real and what is simulated is stated explicitly here and is not
 softened anywhere else this appears (plots, notebooks, or this document):**
 
-- **REAL**: 136 real PT. Telkomsel cellular base-station sites (`site_id`, `site_name`,
+- **REAL**: 136 real tower locations from Indonesian national open data (Kubu Raya/Pontianak;
+  operator labels mixed — 38 PT. TELKOMSEL, 30 INDOSAT, 30 PROTELINDO, 17 TBG, 8 XL AXIATA,
+  7 DAYAMITRA/Mitratel, 4 STP, 2 HCPT; the `namobj` field is simply "Object Name" in the
+  national schema) (`site_id`, `site_name`,
   village/district, lat/long, tower type and construction metadata) in Kubu Raya and
   Pontianak, West Kalimantan, Indonesia — `menaratelepon_ar_50k.csv`. Traced to "Tower
   Telekomunikasi 50K," Kubu Raya Regency's own Open Data portal
