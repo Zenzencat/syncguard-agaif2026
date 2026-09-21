@@ -427,7 +427,7 @@
         <span><i class="ring hh"></i>High-High hotspot</span>
         <span><i class="ring ll"></i>Low-Low coldspot</span>
         <span><i class="ring outlier"></i>Spatial outlier (High-Low / Low-High)</span>
-        <span><i class="dia"></i>Alerting (hysteresis-confirmed)</span>
+        <span title="Each red diamond is one alerting tower. Nearby alerting towers are grouped into a single incident in the queue, so several diamonds can be one incident."><i class="dia"></i>Alerting (hysteresis-confirmed)</span>
         <span><i class="ring sel"></i>Selected incident</span>
       </div>
       <div class="chart-fill"><div id="live-map"></div></div>
@@ -469,7 +469,7 @@
       </div>
       </details>
       <div class="incident-wrap">
-        <h3 class="h3-row">Incident queue <span class="has-pop"><button type="button" class="info" aria-label="Incident queue: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Alerting (hysteresis-confirmed) events chained into one incident when consecutive readings are within the correlation window of each other in time -- not a spatial-clustering algorithm. Real deployments would group by shared timing source or region.</span><span class="pop-label">Status</span><span class="pop-p">New / Confirmed / Dismissed, from the same analyst labels as before -- confirming or dismissing an incident labels its single peak-severity event, not every reading in it.</span></span></span></span></h3>
+        <h3 class="h3-row">Incident queue <span class="has-pop"><button type="button" class="info" aria-label="Incident queue: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Alerting (hysteresis-confirmed) events are chained into one incident when consecutive events are close in time (within the correlation window, default 120 s) AND close in space (default 5 km, straight-line between their towers). Several nearby alerting towers therefore show as several red diamonds on the map but ONE incident here; towers far apart, alerting in separate bursts, or from separate replay runs become separate incidents. A demo heuristic, not a real clustering algorithm: real deployments would group by shared timing source or region.</span><span class="pop-label">Status</span><span class="pop-p">New / Confirmed / Dismissed, from the same analyst labels as before -- confirming or dismissing an incident labels its single peak-severity event, not every reading in it.</span></span></span></span></h3>
         <div id="incident-queue"><div class="ph">Connect to the SyncGuard API to load incidents.</div></div>
       </div>
       <div class="incident-detail-wrap" id="incident-detail-wrap">
@@ -1310,7 +1310,11 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         symbol:'diamond', color:'#A83232', opacity:1, line:{color:c.markerLine, width:1.8},
         size: alerting.map(t => isSelectedTower(t) ? 24 : 14),
       },
-      text: alerting.map(t => `<b>${t.site_id}</b> — ALERTING (hysteresis-confirmed)<br>Debounced over this recording's real reading sequence -- not a single flickering event.<br><i>Click to select its incident</i>`),
+      text: alerting.map(t => {
+        const inc = incidentForTower(t.site_id), n = inc ? inc.towers.length : 0;
+        const grouping = inc ? `In incident ${escapeHtml(inc.incident_id)} (${n} tower${n === 1 ? '' : 's'}) -- nearby alerting towers are grouped into one incident` : 'Nearby alerting towers are grouped into one incident';
+        return `<b>${t.site_id}</b> — ALERTING (hysteresis-confirmed)<br>Debounced over this recording's real reading sequence -- not a single flickering event.<br>${grouping}.<br><i>Click to select its incident</i>`;
+      }),
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#A83232', font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
@@ -1338,7 +1342,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       activeTrace.x, activeTrace.y, activeTrace.customdata, activeTrace.marker.color,
       activeTrace.marker.size, activeTrace.text,
       lisaTrace && [lisaTrace.x, lisaTrace.y, lisaTrace.marker.color, lisaTrace.marker.size],
-      alertTrace && [alertTrace.x, alertTrace.y, alertTrace.marker.size],
+      alertTrace && [alertTrace.x, alertTrace.y, alertTrace.marker.size, alertTrace.text],
       selectedTrace && [selectedTrace.x, selectedTrace.y, selectedIncidentId],
     ]));
     if(mapHash === lastMapHash) return;
