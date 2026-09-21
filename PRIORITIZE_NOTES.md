@@ -52,3 +52,23 @@ hysteresis registry is in-process, so restarting the service resets streak state
   `population unavailable`.
 - There is no real per-tower GNSS interference telemetry in this project. `/priority` is not
   field validation and does not establish real affected population.
+
+## Update 2026-09-21: the flagged set is the session's alerted towers
+
+The "Stale-alert behavior" above (gate on each tower's latest event) disagreed with the dashboard
+map once a recording returned to normal: replay hysteresis is per recording, so towers that
+received no later event kept an old `alerting` event and were counted as flagged while the map
+showed nothing alerting. `GET /priority` now uses the rule the dashboard uses:
+
+- **Flagged set = towers that alerted at any point in the current session** (a stored event with
+  hysteresis state `alerting`, or, with no hysteresis state such as `POST /score`, a threshold
+  `attack` verdict). "Session" is what the event store holds; `POST /demo/reset` clears it.
+- Each row says whether the tower is **alerting now** (`alerting_now: true`, `state: "alerting"`)
+  or has **cleared** (`state: "cleared"`). Alerting now = the tower's latest event is `alerting`
+  and, for replay events, the most recent replay event is still `alerting`. Ingest hysteresis is
+  per tower, so an ingest tower's own latest state is its current state.
+- The payload adds `n_alerting_now` and `n_cleared`; `n_flagged` is the whole session set.
+- **Ranking is unchanged**: `pop_2km` descending, severity breaking ties. A cleared tower is ranked
+  by the same exposure proxy; it is marked, not demoted.
+- An event with no hysteresis state (`POST /score`) is never "alerting now", matching the map, so a
+  tower whose only flagged event is a threshold verdict shows as `cleared`.

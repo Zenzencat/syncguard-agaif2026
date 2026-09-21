@@ -607,9 +607,14 @@ async def incidents(limit: int = Query(default=INCIDENT_EVENT_CAP, ge=1, le=INCI
 async def priority():
     """Which flagged towers to look at first: gate, then rank by estimated nearby population.
 
-    Gate: severity decides which towers are flagged -- a tower is in the list only if its
-    latest event is in hysteresis state 'alerting' (or, for events that carry no hysteresis
-    state such as POST /score, its per-reading verdict is 'attack', i.e. probability >= 0.52).
+    Gate: a tower is in the list if it alerted at any point in the current session (the towers
+    the dashboard draws as solid + hollow diamonds): a stored event in hysteresis state
+    'alerting' or, for events that carry no hysteresis state such as POST /score, a per-reading
+    'attack' verdict (probability >= 0.52). Each row carries `alerting_now` / `state` --
+    alerting now, or cleared (alerted earlier, not alerting now) -- and the payload has
+    `n_flagged` (the session set), `n_alerting_now` and `n_cleared`. "Session" is what the
+    event store holds; POST /demo/reset clears it. Before 2026-09-21 the gate was each tower's
+    latest event only, which disagreed with the map once a recording returned to normal.
     Rank: flagged towers are ordered by ESTIMATED people within 2 km (`pop_2km`), descending;
     severity is a secondary field. This is deliberately NOT severity x population, which would
     just be a population ranking -- see PRIORITIZE_NOTES.md.
@@ -618,9 +623,11 @@ async def priority():
     between towers -- the response carries no total, and none should be computed from it.
     """
     latest = app.state.event_store.latest_severity_per_tower()
+    session_flagged = app.state.event_store.flagged_tower_ids()
     ms = app.state.model_service
     threshold = ms.decision_threshold if ms is not None else 0.52
-    return rank_priority(latest, app.state.towers, threshold=threshold)
+    return rank_priority(latest, app.state.towers, threshold=threshold,
+                         session_flagged=session_flagged)
 
 
 @app.get("/events/{event_id}/explain", response_model=ExplainResponse)

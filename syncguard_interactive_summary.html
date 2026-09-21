@@ -214,6 +214,7 @@
   .priority-site{min-width:0;}
   .priority-site strong,.priority-site span{display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .priority-site span{font-size:11px; color:var(--muted); margin-top:2px;}
+  .priority-site .priority-state.now{color:var(--red); font-weight:600;}
   .priority-pop,.priority-severity{font-family:var(--font-mono); font-variant-numeric:tabular-nums; text-align:right;}
   .priority-pop.unavailable{font-family:var(--font-ui); color:var(--muted); font-size:11.5px;}
   .priority-empty,.priority-error{padding:24px; color:var(--muted); text-align:center;}
@@ -418,7 +419,7 @@
     <div class="kpi-tiles">
       <div class="stat hero"><div class="v"><span class="pill normal" id="alert-pill"><span class="dot"></span><span id="alert-pill-text">normal</span></span></div><div class="l">Alert state <span class="has-pop"><button type="button" class="info" aria-label="Alert state: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Debounced over this recording's real reading sequence — 3 consecutive above-threshold readings to alert, 5 below to clear. Not naive per-event flagging.</span></span></span></span></div></div>
       <div class="stat"><div class="v" id="active-alerts">0</div><div class="l">active alerts</div></div>
-      <div class="stat"><div class="v" id="flagged-towers">0</div><div class="l">flagged towers</div></div>
+      <div class="stat"><div class="v" id="flagged-towers">0</div><div class="l" title="Alerting now or earlier this session. Active alerts shows what is alerting now.">Towers alerted this session</div></div>
       <div class="stat"><div class="v" id="replay-count">0</div><div class="l">events scored this session</div></div>
     </div>
   </div>
@@ -437,7 +438,7 @@
   <section class="tab-panel panel-live active" id="tab-live" role="tabpanel" aria-label="NOC">
     <div class="noc-overview" id="noc-overview" aria-label="NOC overview">
       <div class="stat"><div class="v" id="noc-active-alerts">0</div><div class="l">active alerts</div></div>
-      <div class="stat"><div class="v" id="noc-flagged-towers">0</div><div class="l">flagged towers</div></div>
+      <div class="stat"><div class="v" id="noc-flagged-towers">0</div><div class="l" title="Alerting now or earlier this session. Active alerts shows what is alerting now.">Towers alerted this session</div></div>
       <div class="stat"><div class="v" id="noc-silent-towers">0</div><div class="l">silent towers <span class="has-pop"><button type="button" class="info" aria-label="Silent towers: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Real towers with no scored reading yet this session -- not the same as "quiet/clean". A fresh session starts with all 136 silent.</span></span></span></span></div></div>
       <div class="data-mode" id="noc-data-mode">THIS SESSION</div>
     </div>
@@ -1395,11 +1396,13 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
 
   function renderPriority(payload){
     const rows = payload.towers || [];
-    prioritySummaryEl.textContent = `${payload.n_flagged ?? rows.length} flagged tower${(payload.n_flagged ?? rows.length) === 1 ? '' : 's'}`;
+    const nAlerted = payload.n_flagged ?? rows.length;
+    prioritySummaryEl.textContent = `${nAlerted} tower${nAlerted === 1 ? '' : 's'} alerted this session` +
+      (payload.n_alerting_now === undefined ? '' : ` · ${payload.n_alerting_now} alerting now`);
     flaggedTowersEl.textContent = payload.n_flagged ?? rows.length;
     if(nocFlaggedTowersEl) nocFlaggedTowersEl.textContent = payload.n_flagged ?? rows.length;
     if(!rows.length){
-      priorityListEl.innerHTML = `<div class="priority-empty">${escapeHtml(payload.empty_state || 'No towers are currently flagged by the severity gate.')}</div>`;
+      priorityListEl.innerHTML = `<div class="priority-empty">${escapeHtml(payload.empty_state || 'No towers have alerted this session.')}</div>`;
       return;
     }
     priorityListEl.innerHTML =
@@ -1409,6 +1412,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         const population = unavailable ? 'population unavailable' : Math.round(row.pop_2km).toLocaleString();
         const severity = (row.severity === null || row.severity === undefined) ? '—' : Number(row.severity).toFixed(3);
         const identity = towerIdentity(row.tower_key, row.site_name);
+        const stateTag = row.alerting_now === undefined ? ''
+          : (row.alerting_now ? '<span class="priority-state now">Alerting now</span>'
+                              : '<span class="priority-state cleared">Cleared — alerted earlier this session</span>');
         return `<div class="priority-row">
           <div class="priority-rank">#${escapeHtml(row.rank)}</div>
           <div class="priority-site"><strong>${escapeHtml(identity.title)}</strong><span>${escapeHtml(identity.subtitle)}</span></div>

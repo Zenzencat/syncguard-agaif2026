@@ -256,6 +256,21 @@ class EventStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def flagged_tower_ids(self) -> set[str]:
+        """Towers that have had at least one FLAGGED event in the stored session (the same
+        is_flagged rule the incident queue uses: hysteresis 'alerting', or -- for rows with no
+        hysteresis state such as POST /score -- a per-reading 'attack' verdict). "Session" is
+        what is in the store: POST /demo/reset clears it. /priority uses this so its flagged
+        set matches the dashboard's solid + hollow diamonds (alerting now + alerted earlier)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT tower_site_id FROM scored_events "
+                "WHERE tower_site_id IS NOT NULL "
+                "  AND (alert_state = 'alerting' "
+                "       OR (alert_state IS NULL AND predicted_label = 'attack'))"
+            ).fetchall()
+        return {r[0] for r in rows}
+
     def latest_severity_per_tower(self) -> dict[str, dict]:
         """Most recent scored event for each tower that has ever been attributed one --
         what the dashboard map renders when idle (no time-window filtering)."""

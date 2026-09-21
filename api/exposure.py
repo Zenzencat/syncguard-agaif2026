@@ -127,6 +127,29 @@ def is_flagged(event: dict) -> tuple[bool, str]:
     return event.get("predicted_label") == "attack", GATE_THRESHOLD
 
 
+def latest_replay_state(latest_by_tower: dict[str, dict]) -> str | None:
+    """alert_state of the most recent replay event (any tower), or None if there is none.
+
+    Replay hysteresis is per RECORDING, not per tower: when the recording returns to normal, a
+    tower that simply received no later event still carries an old 'alerting' event. The most
+    recent replay event is the recording's current state, and it is always some tower's latest
+    event, so it can be read from `latest_by_tower` alone."""
+    replay = [e for e in latest_by_tower.values()
+              if e.get("source") == "replay" and e.get("id") is not None]
+    return max(replay, key=lambda e: e["id"]).get("alert_state") if replay else None
+
+
+def is_alerting_now(event: dict, replay_state: str | None) -> bool:
+    """Whether a tower is alerting NOW -- exactly the rule the dashboard draws as a solid red
+    diamond. Its latest event must be in hysteresis state 'alerting', and, for replay events,
+    the recording itself must still be alerting (`replay_state`). Ingest hysteresis is per tower,
+    so an ingest tower's own latest state already is its current state. Events with no
+    hysteresis state (POST /score) are never "alerting now"."""
+    if event.get("alert_state") != "alerting":
+        return False
+    return event.get("source") != "replay" or replay_state == "alerting"
+
+
 def pop_2km_by_tower(towers: pd.DataFrame) -> dict[str, float]:
     """tower_key -> ESTIMATED people within 2 km, for the towers that have an estimate.
 
@@ -140,10 +163,17 @@ def pop_2km_by_tower(towers: pd.DataFrame) -> dict[str, float]:
 
 
 def rank_priority(latest_by_tower: dict[str, dict], towers: pd.DataFrame,
-                  threshold: float = DEFAULT_THRESHOLD) -> dict:
-    """Gate-then-rank over the latest event per tower.
+                  threshold: float = DEFAULT_THRESHOLD,
+                  session_flagged: set[str] | None = None) -> dict:
+    """Gate-then-rank over the towers that alerted in the current session.
 
-    1. Gate: keep only towers whose latest event is flagged (is_flagged).
+    1. Gate: keep towers that alerted at any point in the session -- `session_flagged` (every
+       tower with a flagged event in the store, see EventStore.flagged_tower_ids) plus any tower
+       whose latest event is flagged (is_flagged). This is the set the dashboard draws as solid
+       (alerting now) plus hollow (alerted earlier, not alerting now) diamonds. Each row says
+       which it is: `alerting_now` / `state`. Without `session_flagged` the gate is the latest
+       event only, as before. Ingest towers keep per-tower semantics: `alerting_now` is their own
+       latest state; only replay towers also depend on the recording's current state.
     2. Rank: order the survivors by pop_2km, descending. Severity is carried as a secondary
        field and breaks ties. Towers with no population estimate sort last (still listed --
        a flagged tower is not hidden because its exposure is unknown).
@@ -154,12 +184,14 @@ def rank_priority(latest_by_tower: dict[str, dict], towers: pd.DataFrame,
     by_key = towers.set_index("tower_key")
     rows, n_events, basis_counts = [], 0, {GATE_HYSTERESIS: 0, GATE_THRESHOLD: 0}
 
+    replay_state = latest_replay_state(latest_by_tower)
     for tower_key, ev in latest_by_tower.items():
         n_events += 1
-        flagged, basis = is_flagged(ev)
-        if not flagged:
+        flagged_latest, basis = is_flagged(ev)
+        if not (flagged_latest or (session_flagged is not None and tower_key in session_flagged)):
             continue
         basis_counts[basis] += 1
+        alerting_now = is_alerting_now(ev, replay_state)
         if tower_key in by_key.index:
             t = by_key.loc[tower_key]
             site_id, site_name = t["site_id"], t["site_name"]
@@ -186,6 +218,8 @@ def rank_priority(latest_by_tower: dict[str, dict], towers: pd.DataFrame,
             "severity": ev.get("severity"),
             "probability": ev.get("probability"),
             "alert_state": ev.get("alert_state"),
+            "alerting_now": alerting_now,
+            "state": "alerting" if alerting_now else "cleared",
             "gate_basis": basis,
             "event_id": ev.get("id"),
             "event_source": ev.get("source"),
@@ -203,19 +237,24 @@ def rank_priority(latest_by_tower: dict[str, dict], towers: pd.DataFrame,
     payload = {
         "as_of": datetime.now(timezone.utc).isoformat(),
         "method": (
-            "gate-then-rank. Gate: a tower is flagged when its latest event is in hysteresis "
-            "state 'alerting'; events with no hysteresis state (e.g. POST /score) fall back to "
-            f"the per-reading threshold verdict (probability >= {threshold:g}). Rank: flagged "
+            "gate-then-rank. Gate: a tower is in the list when it alerted at any point in the "
+            "current session (a flagged event: hysteresis state 'alerting', or -- with no "
+            f"hysteresis state, e.g. POST /score -- a threshold verdict, probability >= "
+            f"{threshold:g}). Each row says whether it is alerting now or has cleared. Rank: "
             "towers ordered by estimated population within 2 km (pop_2km), descending. "
             "Severity is a secondary field and breaks ties; it does not multiply the ranking."
         ),
         "gate": {
-            "primary": "hysteresis alert_state == 'alerting'",
-            "fallback": f"predicted_label == 'attack' (probability >= {threshold:g})",
+            "primary": "hysteresis alert_state == 'alerting' on any event in the session",
+            "fallback": f"predicted_label == 'attack' (probability >= {threshold:g}) when an event has no hysteresis state",
+            "alerting_now": "latest event alert_state == 'alerting' and, for replay events, the "
+                            "most recent replay event is still 'alerting' (the dashboard's solid diamond)",
             "n_towers_with_events": n_events,
             "flagged_by_basis": basis_counts,
         },
         "n_flagged": len(rows),
+        "n_alerting_now": sum(1 for r in rows if r["alerting_now"]),
+        "n_cleared": sum(1 for r in rows if not r["alerting_now"]),
         "ranked_by": "pop_2km",
         "exposure_label": EXPOSURE_LABEL,
         "display_label": SEVERITY_LABEL,
@@ -238,7 +277,7 @@ def rank_priority(latest_by_tower: dict[str, dict], towers: pd.DataFrame,
     }
     if not rows:
         payload["empty_state"] = (
-            "No towers are currently flagged by the severity gate, so there is nothing "
-            "to rank. Start a replay or ingest observations to populate current events."
+            "No towers have alerted this session, so there is nothing to rank. "
+            "Start a replay or ingest observations to populate events."
         )
     return payload

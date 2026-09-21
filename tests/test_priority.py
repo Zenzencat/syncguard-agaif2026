@@ -106,7 +106,7 @@ def test_priority_endpoint_empty_state(client, monkeypatch):
     body = response.json()
     assert body["towers"] == []
     assert body["n_flagged"] == 0
-    assert "No towers are currently flagged" in body["empty_state"]
+    assert "No towers have alerted this session" in body["empty_state"]
     assert not _has_key_fragment(body, "total")
 
 
