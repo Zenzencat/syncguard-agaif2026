@@ -25,12 +25,15 @@ names, not in plot titles, not in prose. Concretely:
 
 ## What is REAL
 
-**Source**: `menaratelepon_ar_50k.csv` — "Tower Telekomunikasi 50K" on Kubu Raya Regency's own
-Open Data portal (opendata.kuburayakab.go.id), supplied to this project via the bootcamp's
+**Source**: `menaratelepon_ar_50k.csv` — "TOWER TELEKOMUNIKASI 50K" on Satu Data Indonesia, the
+national open-data portal (https://data.go.id/dataset/dataset/tower-telekomunikasi-50k;
+publisher listed as Kabupaten Kubu Raya), the page the bootcamp's own notebook cites ("The
+dataset is taken from Satu Data Indonesia"); supplied to this project via the bootcamp's
 Module 6 (AD1002) materials. Committed in-repo at
 `spatial_raw/Module 6_AD1002_Dataset (Tower)/menaratelepon_ar_50k.csv` (see `project_abstract.md`
-§3 and `README.md` for the licensing note — the portal's license field is blank, so this is
-public government data, not confirmed-open-license data).
+§3 and `README.md` for the licensing note — the page marks the dataset "Terbuka" (open) but
+shows no explicit license field, so this is public government data, not
+confirmed-open-license data).
 
 - **Country/region**: Indonesia — Kubu Raya and Pontianak, West Kalimantan (Kalimantan
   Barat).
