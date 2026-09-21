@@ -605,14 +605,14 @@ function chartColors(){
     paper:'#FFFFFF', grid:'#D8E3E8', axis:'#5B6472', ink:'#1B2430', muted:'#5B6472',
     mapLand:'#E4DCC0', mapCoast:'#7A8792', mapWater:'#9BCBE8', mapRoad:'#8A94A0',
     mapBuiltup:'#D3C7A5', mapLabel:'#2E3B44', mapLabelHalo:'#FFFFFF',
-    markerLine:'#1B2430', baseMarker:'#A8A292', baseMarkerLine:'#FFFFFF',
+    markerLine:'#1B2430', baseMarker:'#6B7280', baseMarkerLine:'#FFFFFF', halo:'#FFFFFF', ringHalo:'#FFFFFF',
     hoverBg:'#FFFFFF', hoverBorderNeutral:'#C7C2B4', fiBar:'#2A5C82', epicenter:'#2A5C82',
     lisa:{1:'#A83232', 2:'#1B2430', 3:'#2A5C82', 4:'#1B2430'}, alertLine:'#FFFFFF', flagText:'#7F6129',
   } : {
     paper:'#0E1826', grid:'#233145', axis:'#8492A6', ink:'#E7ECF3', muted:'#8492A6',
     mapLand:'#28405A', mapCoast:'#6E88A0', mapWater:'#3576A6', mapRoad:'#7E92A4',
     mapBuiltup:'#324C68', mapLabel:'#C7D2E0', mapLabelHalo:'#0E1826',
-    markerLine:'#0B1119', baseMarker:'#43526A', baseMarkerLine:'#0B1119',
+    markerLine:'#0B1119', baseMarker:'#C7D2E0', baseMarkerLine:'#0B1119', halo:'#FFFFFF', ringHalo:'#0B1119',
     hoverBg:'#141F2E', hoverBorderNeutral:'#3A4B60', fiBar:'#4F9BD8', epicenter:'#5FB0EC',
     lisa:{1:'#E85D62', 2:'#C7D2E0', 3:'#5FB0EC', 4:'#C7D2E0'}, alertLine:'#0B1119', flagText:'#E7A552',
   };
@@ -775,12 +775,34 @@ function basemapLayoutImages(){
   }];
 }
 
-function basemapPlaceAnnotations(c){
+// White under-stroke ("halo") drawn beneath a marker trace so the marker reads against any
+// terrain colour of the raster basemap (green / tan / blue / grey). Same positions and symbol as
+// the marker above it, a few px larger; hoverinfo:'skip' so it never intercepts hover or clicks
+// (only the real marker traces carry customdata for plotly_click).
+function markerHalo(x, y, sizes, symbol, c, grow){
+  return {type:'scattergl', mode:'markers', x, y, hoverinfo:'skip', showlegend:false,
+          marker:{symbol: symbol || 'circle', color:c.halo, opacity:0.92,
+                  size: sizes.map(s => s + (grow ?? 6)), line:{width:0}}};
+}
+// Same idea for the open rings (LISA quadrants, selected incident): a wider ring under the
+// coloured one, in the opposite luminance to the ring colours (white in the light theme, dark in
+// the dark theme, where the quadrant/outlier rings are pale) so each ring keeps its own colour.
+function ringHalo(x, y, sizes, ringWidth, c){
+  return {type:'scattergl', mode:'markers', x, y, hoverinfo:'skip', showlegend:false,
+          marker:{symbol:'circle-open', color:c.ringHalo, opacity:0.92, size: sizes, line:{width: ringWidth + 3.5}}};
+}
+
+function basemapPlaceAnnotations(c, avoid){
   // rank 1 = city/town (bold), rank 2 = the curated village/suburb subset (smaller). All are
   // vector text, so they stay crisp when the map zooms to an incident.
+  // Annotations are always drawn above the traces, so a label sitting on a marker washes it out.
+  // `avoid` (optional, [{x,y}] of the markers that must stay visible) lifts any label that would
+  // cover one clear of it; the label stays on the map, the marker stays readable.
   return basemapPlaceLabels.map(p => ({
     x: p.x, y: p.y, text: p.rank === 2 ? p.name : `<b>${p.name}</b>`,
-    showarrow:false, yanchor:'bottom', yshift: p.rank === 2 ? 5 : 8,
+    showarrow:false, yanchor:'bottom',
+    yshift: (p.rank === 2 ? 5 : 8) +
+            (avoid && avoid.some(a => Math.abs(a.x - p.x) <= 0.06 && a.y - p.y >= -0.03 && a.y - p.y <= 0.04) ? 30 : 0),
     font:{color:c.mapLabel, size: p.rank === 2 ? 10 : 11.5, family:FONT_UI},
     bgcolor:c.mapLabelHalo, opacity: p.rank === 2 ? 0.78 : 0.92, borderpad:1.5,
   }));
@@ -825,7 +847,7 @@ function towerLabel(siteId, name){
 function buildTraces(t){
   const c = chartColors();
   const sev = towers.map(tw => tw.sev[t]);
-  const sizes = sev.map(s => 7 + 24*Math.max(0, Math.min(1,(s-meta.floor)/(meta.ceiling-meta.floor))));
+  const sizes = sev.map(s => 10 + 22*Math.max(0, Math.min(1,(s-meta.floor)/(meta.ceiling-meta.floor))));
   const hover = towers.map((tw,i) => {
     const label = towerLabel(tw.id, tw.name);
     return (`<b>${label.title}</b> — ${label.subtitle}<br>` +
@@ -842,7 +864,7 @@ function buildTraces(t){
     x: lons, y: lats,
     marker:{
       color: sev, colorscale: severityColorScale(), cmin: meta.floor, cmax: meta.ceiling,
-      size: sizes, line:{color:c.markerLine, width:1},
+      size: sizes, line:{color:c.markerLine, width:1.6},
       colorbar:{title:{text:'SIMULATED severity', font:{color:c.ink, size:11, family:FONT_UI}},
                 tickfont:{color:c.muted, size:11, family:FONT_MONO}, outlinewidth:0, len:0.85}
     },
@@ -853,7 +875,7 @@ function buildTraces(t){
   const epicenterTrace = {
     type:'scattergl', mode:'markers',
     x:[epicenter.lon], y:[epicenter.lat],
-    marker:{symbol:'star', size:22, color:'rgba(0,0,0,0)', line:{color:c.epicenter, width:2.5}},
+    marker:{symbol:'star', size:26, color:'rgba(0,0,0,0)', line:{color:c.epicenter, width:3}},
     text:[`SIMULATED epicenter<br><b>${epicenter.id}</b> — ${epicenter.name}`],
     hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:c.epicenter, font:{color:c.ink, size:12, family:FONT_UI}},
     showlegend:false,
@@ -888,7 +910,9 @@ function buildTraces(t){
     hoverinfo:'skip', showlegend:false,
   };
 
-  return [...basemapTraces(c), towerTrace, epicenterTrace, connectorTrace, labelTrace];
+  return [...basemapTraces(c), markerHalo(lons, lats, sizes, 'circle', c),
+          markerHalo([epicenter.lon], [epicenter.lat], [26], 'star', c, 8),
+          towerTrace, epicenterTrace, connectorTrace, labelTrace];
 }
 
 function severityLayout(){
@@ -905,7 +929,11 @@ function severityLayout(){
            showgrid: !basemapRaster, zeroline: !basemapRaster,
            range: viewBounds.yrange, autorange:false},
     hovermode:'closest',
-    annotations: basemapPlaceAnnotations(c),
+    // Wheel / trackpad-pinch zooms (scrollZoom in the config); dragging pans. No drag-select box.
+    dragmode:'pan',
+    // Keep place labels off the markers this map calls out (epicenter + current top-5 severity).
+    annotations: basemapPlaceAnnotations(c, towers.filter(tw => tw.rank[currentTimestep] <= 5)
+                                                 .concat(epicenter ? [epicenter] : []).map(tw => ({x: tw.lon, y: tw.lat}))),
     images: basemapLayoutImages(),
   };
 }
@@ -926,7 +954,7 @@ function renderSparkline(values, activeIdx){
 
 function renderTimestep(t){
   currentTimestep = t;
-  Plotly.react('map', buildTraces(t), severityLayout(), {displayModeBar:true, displaylogo:false, responsive:true, modeBarButtonsToRemove:['lasso2d','select2d']});
+  Plotly.react('map', buildTraces(t), severityLayout(), {displayModeBar:true, displaylogo:false, responsive:true, scrollZoom:true, modeBarButtonsToRemove:['lasso2d','select2d']});
   document.getElementById('flagcount').textContent = meta.flagged_counts[t];
   document.getElementById('flag-sparkline').innerHTML = renderSparkline(meta.flagged_counts, t);
   document.getElementById('tslider').value = t;
@@ -1225,7 +1253,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     const c = chartColors();
     const base = allTowers.length ? {
       type:'scattergl', mode:'markers', x: allTowers.map(t=>t.long ?? t.lon), y: allTowers.map(t=>t.lat),
-      marker:{color:c.baseMarker, size:6, line:{color:c.baseMarkerLine, width:0.5}},
+      marker:{color:c.baseMarker, size:9, line:{color:c.baseMarkerLine, width:1.5}},
       hoverinfo:'skip', showlegend:false,
     } : null;
     const active = [...liveSeverity.values()];
@@ -1241,8 +1269,8 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         // individual towers distinguishable when several sit close together in the
         // dense part of the cluster, instead of overlapping into one blob. Towers in the
         // selected incident are drawn larger so they're easy to hit once zoomed in.
-        size: active.map(t=>(isSelectedTower(t) ? 1.7 : 1) * (8+14*t.severity)),
-        opacity:1, line:{color:c.markerLine, width:1.2},
+        size: active.map(t=>(isSelectedTower(t) ? 1.7 : 1) * (13+13*t.severity)),
+        opacity:1, line:{color:c.markerLine, width:1.8},
         colorbar:{title:{text:'Session severity', font:{color:c.ink, size:11, family:FONT_UI}}, tickfont:{color:c.muted, size:11, family:FONT_MONO}, outlinewidth:0, len:0.85},
       },
       text: active.map(t => { const label=towerIdentity(t.site_id,t.name); return `<b>${label.title}</b> — ${label.subtitle}<br>Live severity: <b>${t.severity.toFixed(3)}</b><br>Correlation (real, distance-weighted): ${t.correlation.toFixed(3)}<br><i>Tower attribution SIMULATED${attributionNote()}</i><br><i>Click to select its incident / see why (SHAP)</i>`; }),
@@ -1253,9 +1281,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     const lisaTrace = lisaSig.length ? {
       type:'scattergl', mode:'markers', x: lisaSig.map(t=>t.lon), y: lisaSig.map(t=>t.lat),
       marker:{
-        symbol:'circle-open', size: lisaSig.map(t=>16+22*t.severity),
+        symbol:'circle-open', size: lisaSig.map(t=>22+22*t.severity),
         color: lisaSig.map(t => c.lisa[lisaByTower.get(t.site_id).quadrant] || c.muted),
-        line:{width:3},
+        line:{width:3.5},
       },
       text: lisaSig.map(t => {
         const l = lisaByTower.get(t.site_id);
@@ -1279,8 +1307,8 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       type:'scattergl', mode:'markers', x: alerting.map(t=>t.lon), y: alerting.map(t=>t.lat),
       customdata: alerting.map(t=>t.site_id),
       marker:{
-        symbol:'diamond', color:'#A83232', line:{color:c.alertLine, width:1.6},
-        size: alerting.map(t => isSelectedTower(t) ? 20 : 11),
+        symbol:'diamond', color:'#A83232', opacity:1, line:{color:c.markerLine, width:1.8},
+        size: alerting.map(t => isSelectedTower(t) ? 24 : 14),
       },
       text: alerting.map(t => `<b>${t.site_id}</b> — ALERTING (hysteresis-confirmed)<br>Debounced over this recording's real reading sequence -- not a single flickering event.<br><i>Click to select its incident</i>`),
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#A83232', font:{color:c.ink, size:12, family:FONT_UI}},
@@ -1289,12 +1317,16 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     const selectedTowers = selectedSiteIds ? active.filter(isSelectedTower) : [];
     const selectedTrace = selectedTowers.length ? {
       type:'scattergl', mode:'markers', x: selectedTowers.map(t=>t.lon), y: selectedTowers.map(t=>t.lat),
-      marker:{symbol:'circle-open', size: 32, color:c.epicenter, line:{color:c.epicenter, width:2.5}},
+      marker:{symbol:'circle-open', size: 36, color:c.epicenter, line:{color:c.epicenter, width:3}},
       text: selectedTowers.map(t => `<b>${t.site_id}</b> — part of selected incident ${escapeHtml(selectedIncidentId)}`),
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:c.epicenter, font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
-    const traces = [...basemapTraces(c), base, activeTrace, lisaTrace, alertTrace, selectedTrace].filter(Boolean);
+    const activeHalo = active.length ? markerHalo(activeTrace.x, activeTrace.y, activeTrace.marker.size, 'circle', c) : null;
+    const lisaHalo = lisaTrace ? ringHalo(lisaTrace.x, lisaTrace.y, lisaTrace.marker.size, 3.5, c) : null;
+    const selectedHalo = selectedTrace ? ringHalo(selectedTrace.x, selectedTrace.y, selectedTrace.marker.size, 3, c) : null;
+    const traces = [...basemapTraces(c), base, activeHalo, activeTrace, lisaHalo, lisaTrace, alertTrace,
+                    selectedHalo, selectedTrace].filter(Boolean);
     // Zoom to the selected incident's towers (padded) so its markers are easy to see and
     // click; otherwise the full session extent, same as before.
     const zoomRange = selectedTowers.length ? incidentZoomRange(selectedTowers) : null;
@@ -1320,7 +1352,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
              showgrid: !basemapRaster, zeroline: !basemapRaster,
              range: zoomRange ? zoomRange.yrange : viewBounds.yrange, autorange:false},
       hovermode:'closest',
-      annotations: basemapPlaceAnnotations(c),
+      // Wheel / trackpad-pinch zooms (scrollZoom in the config); dragging pans. No drag-select box.
+      dragmode:'pan',
+      annotations: basemapPlaceAnnotations(c, [...alerting, ...lisaSig].map(t => ({x: t.lon, y: t.lat}))),
       images: basemapLayoutImages(),
       // Keeps whatever zoom/pan the user set across the constant stream of redraws; the
       // revision only changes when the selected incident changes, which re-applies the
@@ -1332,7 +1366,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     // throw "axis scaling" if the pane has no size yet) escape: it would abort connect() and
     // leave the incident queue unloaded. A failed draw clears the hash so the next update retries.
     try{
-      Plotly.react('live-map', traces, liveLayout, {displayModeBar:false, responsive:true});
+      Plotly.react('live-map', traces, liveLayout, {displayModeBar:false, responsive:true, scrollZoom:true});
       lastMapHash = mapHash;
     }catch(err){
       lastMapHash = null;

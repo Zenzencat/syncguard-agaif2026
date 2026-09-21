@@ -80,9 +80,9 @@ def test_basemap_layer_is_included_in_both_maps_trace_lists(client):
     happen in this codebase: someone editing the trace array and dropping the
     `...basemapTraces(c)` spread. The trace data itself is asset-tested in test_basemap.py."""
     js = _script(client.get("/dashboard").text)
-    assert "return [...basemapTraces(c), towerTrace, epicenterTrace" in js, (
+    assert "return [...basemapTraces(c)," in js, (
         "Spatial analysis map's buildTraces() must draw the basemap as its bottom layer"
     )
-    assert "const traces = [...basemapTraces(c), base, activeTrace" in js, (
+    assert "const traces = [...basemapTraces(c), base," in js, (
         "NOC map's renderLiveMap() must draw the basemap as its bottom layer"
     )

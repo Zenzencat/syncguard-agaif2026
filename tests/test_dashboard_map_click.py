@@ -85,7 +85,7 @@ def test_selected_incident_towers_are_larger_and_map_zooms_to_them(client):
     js = _script(client.get("/dashboard").text)
     body = _function_body(js, "renderLiveMap")
     assert "isSelectedTower(t) ? 1.7 : 1" in body        # active markers scaled up
-    assert "isSelectedTower(t) ? 20 : 11" in body        # alert diamonds scaled up
+    assert "isSelectedTower(t) ? 24 : 14" in body        # alert diamonds scaled up
     assert "incidentZoomRange(selectedTowers)" in body    # zoom to the incident's towers
     assert "function incidentZoomRange(" in js
 
