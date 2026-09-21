@@ -1018,6 +1018,18 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   let sessionCount = 0;
   let moranTimer = null;
   const liveSeverity = new Map(); // site_id -> {lat, lon, name, severity, correlation, event_id, alert_state}
+  // The SIMULATED tower-attribution mode the server actually used ('epicenter' | 'round_robin'),
+  // from GET /replay/status. null until a replay has run, so the tooltip never names a mode
+  // that wasn't in effect.
+  let replayAttribution = null;
+  const attributionNote = () => replayAttribution ? ` (${replayAttribution.replace('_', '-')})` : '';
+  async function refreshReplayAttribution(){
+    try{
+      const s = await api('/replay/status').then(r => r.json());
+      const mode = s.status !== 'idle' ? s.attribution : null;
+      if(mode !== replayAttribution){ replayAttribution = mode; renderLiveMap(); }
+    }catch(err){ /* the tooltip just keeps its last known mode */ }
+  }
   const lisaByTower = new Map();  // site_id -> {quadrant, label, p_value, significant}
   const eventsById = new Map();   // event_id -> {top_features, attack_type, tower, severity, predicted_label, ...}
   let allTowers = [];
@@ -1233,7 +1245,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         opacity:1, line:{color:c.markerLine, width:1.2},
         colorbar:{title:{text:'Session severity', font:{color:c.ink, size:11, family:FONT_UI}}, tickfont:{color:c.muted, size:11, family:FONT_MONO}, outlinewidth:0, len:0.85},
       },
-      text: active.map(t => { const label=towerIdentity(t.site_id,t.name); return `<b>${label.title}</b> — ${label.subtitle}<br>Live severity: <b>${t.severity.toFixed(3)}</b><br>Correlation (real, distance-weighted): ${t.correlation.toFixed(3)}<br><i>Tower attribution SIMULATED (round-robin)</i><br><i>Click to select its incident / see why (SHAP)</i>`; }),
+      text: active.map(t => { const label=towerIdentity(t.site_id,t.name); return `<b>${label.title}</b> — ${label.subtitle}<br>Live severity: <b>${t.severity.toFixed(3)}</b><br>Correlation (real, distance-weighted): ${t.correlation.toFixed(3)}<br><i>Tower attribution SIMULATED${attributionNote()}</i><br><i>Click to select its incident / see why (SHAP)</i>`; }),
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#2F6E44', font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     };
@@ -1413,7 +1425,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     if(incidentRefreshTimer) return;
     const wait = Math.max(0, REFRESH_THROTTLE_MS - (Date.now() - incidentLastRun));
     incidentRefreshTimer = setTimeout(() => {
-      incidentRefreshTimer = null; incidentLastRun = Date.now(); fetchIncidents();
+      incidentRefreshTimer = null; incidentLastRun = Date.now(); fetchIncidents(); refreshReplayAttribution();
     }, wait);
   }
 
@@ -1881,6 +1893,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
 
       const mapState = await api('/events/map').then(r => r.json());
       const replayStatus = await api('/replay/status').then(r => r.json());
+      replayAttribution = replayStatus.status !== 'idle' ? replayStatus.attribution : null;
       const recentIngest = mapState.some(e => e.source === 'ingest' &&
         Date.now() - new Date(e.created_at).getTime() <= 120000);
       if(replayStatus.status === 'running') setDataMode('REPLAY - recorded receiver logs, tower attribution SIMULATED');
@@ -1966,7 +1979,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     const params = new URLSearchParams({speed: speedSelect.value, attribution: 'epicenter'});
     if(runSelect.value) params.set('run_id', runSelect.value);
     const res = await api(`/replay/start?${params}`, {method:'POST'});
-    if(res.ok){ btnStart.disabled = true; btnStop.disabled = false; setDataMode('REPLAY - recorded receiver logs, tower attribution SIMULATED'); }
+    if(res.ok){ replayAttribution = params.get('attribution'); btnStart.disabled = true; btnStop.disabled = false; setDataMode('REPLAY - recorded receiver logs, tower attribution SIMULATED'); }
     else { const err = await res.json().catch(()=>({detail:res.statusText})); setStatus('bad', err.detail); }
   });
   btnStop.addEventListener('click', async () => {
