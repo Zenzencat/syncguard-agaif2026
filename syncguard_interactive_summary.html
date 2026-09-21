@@ -1417,7 +1417,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
                               : '<span class="priority-state cleared">Cleared — alerted earlier this session</span>');
         return `<div class="priority-row">
           <div class="priority-rank">#${escapeHtml(row.rank)}</div>
-          <div class="priority-site"><strong>${escapeHtml(identity.title)}</strong><span>${escapeHtml(identity.subtitle)}</span></div>
+          <div class="priority-site"><strong>${escapeHtml(identity.title)}</strong><span>${escapeHtml(identity.subtitle)}</span>${stateTag}</div>
           <div class="priority-pop${unavailable ? ' unavailable' : ''}">${escapeHtml(population)}</div>
           <div class="priority-severity">${escapeHtml(severity)}</div>
         </div>`;
@@ -2262,14 +2262,17 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     eventSource.onmessage = (msg) => {
       const ev = JSON.parse(msg.data);
       if(!ev.tower) return;
-      if(ev.source === 'replay') setDataMode('REPLAY - recorded receiver logs, tower attribution SIMULATED');
-      else if(ev.source === 'ingest') setDataMode('LIVE INGEST');
+      // Replay events carry no `source` (only run_id); derive it once and use it for the data-mode
+      // label and the alert bookkeeping alike. Reading ev.source here made the REPLAY label dead code.
+      const src = eventSourceOf(ev);
+      if(src === 'replay') setDataMode('REPLAY - recorded receiver logs, tower attribution SIMULATED');
+      else if(src === 'ingest') setDataMode('LIVE INGEST');
       liveSeverity.set(ev.tower.site_id, {
         site_id: ev.tower.site_id, name: ev.tower.site_name, lat: ev.tower.lat, lon: ev.tower.lon,
         severity: ev.severity, correlation: ev.correlation_score ?? 0, event_id: ev.event_id,
-        alert_state: ev.alert_state, created_at: ev.created_at, source: eventSourceOf(ev),
+        alert_state: ev.alert_state, created_at: ev.created_at, source: src,
       });
-      noteEvent(ev.tower.site_id, eventSourceOf(ev), ev.alert_state, ev.event_id);
+      noteEvent(ev.tower.site_id, src, ev.alert_state, ev.event_id);
       renderLiveMap();
       schedulePriorityRefresh();
       scheduleIncidentRefresh();

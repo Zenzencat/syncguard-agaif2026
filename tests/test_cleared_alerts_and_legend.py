@@ -253,5 +253,9 @@ def test_sse_handler_derives_the_source_instead_of_trusting_ev_source(client):
     m = re.search(r"eventSource\.onmessage = \(msg\) => \{([\s\S]*?)\n    \};", js)
     assert m
     body = m.group(1)
-    assert "source: eventSourceOf(ev)" in body
-    assert "noteEvent(ev.tower.site_id, eventSourceOf(ev), ev.alert_state, ev.event_id)" in body
+    assert "const src = eventSourceOf(ev);" in body
+    assert "source: src," in body
+    assert "noteEvent(ev.tower.site_id, src, ev.alert_state, ev.event_id)" in body
+    # the data-mode label reads the DERIVED source, not ev.source (replay events have none)
+    assert "if(src === 'replay') setDataMode(" in body and "else if(src === 'ingest') setDataMode(" in body
+    assert "ev.source ===" not in body
