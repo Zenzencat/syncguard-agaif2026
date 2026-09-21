@@ -1287,12 +1287,12 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       },
       "pr_doppler_residual_mean": {
           "name": "Motion-consistency check (average)",
-          "desc": "Checks whether each satellite's measured distance change matches its measured frequency shift — genuine signals always agree; spoofed ones can drift out of sync.",
+          "desc": "Checks whether each satellite's measured distance change matches its measured frequency shift — genuine signals stay closely matched; spoofed ones drift apart.",
           "unit": "m/s"
       },
       "pr_doppler_residual_std": {
           "name": "Motion-consistency check (spread)",
-          "desc": "Checks whether each satellite's measured distance change matches its measured frequency shift — genuine signals always agree; spoofed ones can drift out of sync.",
+          "desc": "Checks whether each satellite's measured distance change matches its measured frequency shift — genuine signals stay closely matched; spoofed ones drift apart.",
           "unit": "m/s"
       }
   }/*FEATURE_LABELS_END*/;

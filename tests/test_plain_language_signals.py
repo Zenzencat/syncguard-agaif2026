@@ -100,6 +100,9 @@ def test_labels_keep_the_corrections_found_against_the_code(client):
     # (average) and (spread) rows.
     for f in ("pr_doppler_residual_mean", "pr_doppler_residual_std"):
         assert "each satellite's measured distance change matches its measured frequency shift" in labels[f]["desc"], f
+        # "always agree" was wrong: clean data has a median residual spread of about 5 m/s, not 0
+        assert "genuine signals stay closely matched; spoofed ones drift apart" in labels[f]["desc"], f
+        assert "always agree" not in labels[f]["desc"], f
         assert labels[f]["name"].startswith("Motion-consistency check"), f
     assert labels["pr_doppler_residual_mean"]["name"].endswith("(average)")
     assert labels["pr_doppler_residual_std"]["name"].endswith("(spread)")
