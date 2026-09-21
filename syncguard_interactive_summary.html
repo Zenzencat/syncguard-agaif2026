@@ -314,6 +314,10 @@
   .lisa-legend .ring{width:10px; height:10px; border-radius:50%; border:2.5px solid; display:inline-block;}
   .ring.hh{border-color:var(--red);} .ring.ll{border-color:var(--blue);} .ring.outlier{border-color:var(--ink);}
   .dia{display:inline-block; width:8px; height:8px; background:var(--red); transform:rotate(45deg); margin:0 1px;}
+  .dia.hollow{background:transparent; border:2px solid var(--red); width:6px; height:6px;}
+  .lisa-legend{min-height:16px;}  /* entries come and go with the markers; keep the row from jumping */
+  .lisa-legend [hidden]{display:none !important;}
+  .lisa-legend .legend-note{color:var(--muted); font-size:10.5px; font-style:italic;}
   .star{color:var(--blue); font-size:13px; line-height:1;}
   .rank-badge{font-family:var(--font-mono); font-weight:700; color:var(--ink-2); font-size:10.5px;}
   .map-legend{margin:5px 0 0;}
@@ -441,11 +445,13 @@
     <div class="map-col">
       <h3 class="h3-row">Session tower map <span class="has-pop"><button type="button" class="info" aria-label="Session tower map: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Current session map (fill = severity; ring = significant LISA cluster/outlier; ◆ = alerting, hysteresis-confirmed). The data-mode banner identifies replay versus recent ingest.</span><span class="pop-p">A tower can show elevated (red) severity <em>without</em> a diamond — that's a single flickering reading, not yet confirmed. The diamond only appears after the debounce streak — see <code>OPERATIONAL_METRICS.md</code> for why naive per-event alerting would spam.</span><span class="pop-p">Selecting an incident below highlights that incident's towers on the map.</span></span></span></span></h3>
       <div class="lisa-legend">
-        <span><i class="ring hh"></i>High-High hotspot</span>
-        <span><i class="ring ll"></i>Low-Low coldspot</span>
-        <span><i class="ring outlier"></i>Spatial outlier (High-Low / Low-High)</span>
-        <span title="Each red diamond is one alerting tower. Nearby alerting towers are grouped into a single incident in the queue, so several diamonds can be one incident."><i class="dia"></i>Alerting (hysteresis-confirmed)</span>
-        <span><i class="ring sel"></i>Selected incident</span>
+        <span data-legend="hh" hidden><i class="ring hh"></i>High-High hotspot</span>
+        <span data-legend="ll" hidden><i class="ring ll"></i>Low-Low coldspot</span>
+        <span data-legend="outlier" hidden><i class="ring outlier"></i>Spatial outlier (High-Low / Low-High)</span>
+        <span data-legend="alerting" hidden title="Solid red diamond = alerting now. Each one is a single tower; nearby alerting towers are grouped into a single incident in the queue, so several diamonds can be one incident."><i class="dia"></i>Alerting (hysteresis-confirmed)</span>
+        <span data-legend="cleared" hidden title="Hollow red diamond = this tower alerted earlier in the session but is not alerting now."><i class="dia hollow"></i>Recently alerted, now cleared</span>
+        <span data-legend="selected" hidden><i class="ring sel"></i>Selected incident</span>
+        <span class="legend-note" id="legend-cluster-note" hidden></span>
       </div>
       <div class="chart-fill"><div id="live-map"></div></div>
       <div class="map-attribution">Basemap: raster rendered from OpenStreetMap data, bundled offline · (c) OpenStreetMap contributors (ODbL)</div>
@@ -455,7 +461,7 @@
       <details class="controls-panel" id="controls-panel" open>
         <summary><span class="cp-title">Controls</span> <span class="pill pending" id="api-status"><span class="dot"></span><span id="api-status-text">not connected</span></span></summary>
       <div class="ctl-bar">
-        <span class="tag live has-pop"><span>SESSION</span><button type="button" class="info" aria-label="Session data: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Requires the SyncGuard API running (api/main.py). The banner above distinguishes recorded-log replay from recent receiver ingest.</span><span class="pop-label">Scope of claim</span><span class="pop-p">Replay streams <code>syncguard_features.parquet</code> row-by-row through the shipped detector. Probability and severity are real model output; replay tower attribution is SIMULATED round-robin because the receiver dataset has no per-tower mapping.</span></span></span></span>
+        <span class="tag live has-pop"><span>SESSION</span><button type="button" class="info" aria-label="Session data: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Requires the SyncGuard API running (api/main.py). The banner above distinguishes recorded-log replay from recent receiver ingest.</span><span class="pop-label">Scope of claim</span><span class="pop-p">Replay streams <code>syncguard_features.parquet</code> row-by-row through the shipped detector. Probability and severity are real model output; replay tower attribution is SIMULATED<span id="pop-attribution"></span> because the receiver dataset has no per-tower mapping.</span></span></span></span>
         <div class="api-row">
           <button type="button" class="btn conn-toggle" id="conn-toggle" aria-expanded="false" aria-controls="conn-advanced">⚙ Connection</button>
           <span class="has-pop"><button type="button" class="info" aria-label="Connection help: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">The dashboard auto-connects to the SyncGuard API on load. If it shows "not connected": start the API from the repo root (<code>make train &amp;&amp; make serve</code>, or <code>docker compose up --build</code>), then open <b>⚙ Connection</b> and click Connect. This is the only part of the page that talks to a server — everything else is fully static/offline.</span></span></span></span>
@@ -804,9 +810,9 @@ function markerHalo(x, y, sizes, symbol, c, grow){
 // Same idea for the open rings (LISA quadrants, selected incident): a wider ring under the
 // coloured one, in the opposite luminance to the ring colours (white in the light theme, dark in
 // the dark theme, where the quadrant/outlier rings are pale) so each ring keeps its own colour.
-function ringHalo(x, y, sizes, ringWidth, c){
+function ringHalo(x, y, sizes, ringWidth, c, symbol){
   return {type:'scattergl', mode:'markers', x, y, hoverinfo:'skip', showlegend:false,
-          marker:{symbol:'circle-open', color:c.ringHalo, opacity:0.92, size: sizes, line:{width: ringWidth + 3.5}}};
+          marker:{symbol: symbol || 'circle-open', color:c.ringHalo, opacity:0.92, size: sizes, line:{width: ringWidth + 3.5}}};
 }
 
 function basemapPlaceAnnotations(c, avoid){
@@ -1068,12 +1074,26 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   // that wasn't in effect.
   let replayAttribution = null;
   const attributionNote = () => replayAttribution ? ` (${replayAttribution.replace('_', '-')})` : '';
+  // Single place the mode is set, so the marker tooltip and the SESSION popover always agree.
+  function setReplayAttribution(mode){
+    replayAttribution = mode;
+    const el = document.getElementById('pop-attribution');
+    if(el) el.textContent = attributionNote();
+  }
   async function refreshReplayAttribution(){
     try{
       const s = await api('/replay/status').then(r => r.json());
       const mode = s.status !== 'idle' ? s.attribution : null;
-      if(mode !== replayAttribution){ replayAttribution = mode; renderLiveMap(); }
+      if(mode !== replayAttribution){ setReplayAttribution(mode); renderLiveMap(); }
     }catch(err){ /* the tooltip just keeps its last known mode */ }
+  }
+  // Current state of the replay RECORDING = the alert_state of the most recent replay event (any tower).
+  let latestReplayState = null, latestReplayEventId = -1;
+  const everAlerted = new Set();  // towers that alerted at any point (own events, or members of an incident)
+  let clusterNeed = null;         // min towers needed for LISA rings when too few are scored, else null
+  function noteEvent(siteId, source, alertState, eventId){
+    if(alertState === 'alerting') everAlerted.add(siteId);
+    if(source === 'replay' && eventId >= latestReplayEventId){ latestReplayEventId = eventId; latestReplayState = alertState ?? null; }
   }
   const lisaByTower = new Map();  // site_id -> {quadrant, label, p_value, significant}
   const eventsById = new Map();   // event_id -> {top_features, attack_type, tower, severity, predicted_label, ...}
@@ -1302,6 +1322,42 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   }
   // ---- plain-language signals END ----
 
+  // ---- alert state BEGIN (pure helpers; behaviour tested with node in tests/test_cleared_alerts_and_legend.py) ----
+  // A tower's marker is coloured from ITS latest event. Replay hysteresis, though, is per RECORDING:
+  // once the recording returns to normal, a tower that simply received no later event still carries
+  // an old 'alerting' event. Solid red must mean "alerting NOW", so a replay tower only counts as
+  // alerting now while the most recent replay event (any tower) is still 'alerting'. Ingest towers
+  // debounce per tower, so their own latest state already is their current state.
+  // "Cleared" = alerted earlier in the session (its own latest event, or an incident it belongs to)
+  // but not alerting now.
+  function classifyAlerting(towers, replayState, everAlerted){
+    const alertingNow = [], cleared = [];
+    towers.forEach(t => {
+      const own = t.alert_state === 'alerting';
+      if(own && (t.source !== 'replay' || replayState === 'alerting')) alertingNow.push(t);
+      else if(own || (everAlerted && everAlerted.has(t.site_id))) cleared.push(t);
+    });
+    return {alertingNow, cleared};
+  }
+  // The live SSE envelope differs from a /events/map row: ingest events say source:"ingest", but replay
+  // events carry NO `source` -- only run_id/scenario_id. Without this a live page cannot tell replay
+  // towers from ingest towers (a reload can, because /events/map rows have `source`).
+  function eventSourceOf(ev){
+    return ev.source || (ev.run_id !== undefined && ev.run_id !== null ? 'replay' : null);
+  }
+  // A legend entry is shown only while at least one marker of that type is drawn.
+  // LISA quadrants: 1 = hotspot (High-High), 3 = coldspot (Low-Low), 2 and 4 = spatial outliers.
+  function legendVisibility(o){
+    const q = o.lisaQuadrants || [];
+    return {hh: q.includes(1), ll: q.includes(3), outlier: q.includes(2) || q.includes(4),
+            alerting: o.alertingNowCount > 0, cleared: o.clearedCount > 0, selected: o.selectedCount > 0};
+  }
+  // Rings are absent because too few towers are scored (not because nothing is significant).
+  function clustersNeedMoreTowers(d){
+    return !!d && d.computable === false && Number(d.n_towers_scored) < Number(d.min_required);
+  }
+  // ---- alert state END ----
+
   function featurePhrase(feature){
     const f = String(feature || '').toLowerCase();
     if(f.startsWith('agc_')) return 'receiver gain control';
@@ -1457,7 +1513,8 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:c.ink, font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
-    const alerting = active.filter(t => t.alert_state === 'alerting');
+    // Solid red = alerting NOW; a tower that alerted earlier but is not alerting now is drawn hollow.
+    const {alertingNow: alerting, cleared} = classifyAlerting(active, latestReplayState, everAlerted);
     activeAlertsEl.textContent = alerting.length;
     if(nocActiveAlertsEl) nocActiveAlertsEl.textContent = alerting.length;
     refreshSilentTowers();
@@ -1482,6 +1539,19 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#A83232', font:{color:c.ink, size:12, family:FONT_UI}},
       showlegend:false,
     } : null;
+    const clearedTrace = cleared.length ? {
+      type:'scattergl', mode:'markers', x: cleared.map(t=>t.lon), y: cleared.map(t=>t.lat),
+      customdata: cleared.map(t=>t.site_id),
+      marker:{symbol:'diamond-open', color:'#A83232', opacity:1, size: cleared.map(t => isSelectedTower(t) ? 24 : 14), line:{width:2.5}},
+      text: cleared.map(t => {
+        const inc = incidentForTower(t.site_id);
+        const why = t.alert_state === 'alerting' ? 'the recording has since returned to normal' : 'its latest reading is back to normal';
+        const earlier = inc ? `Earlier alert: incident ${escapeHtml(inc.incident_id)}.<br>` : '';
+        return `<b>${t.site_id}</b> — CLEARED (recently alerted, not alerting now)<br>This tower alerted earlier in the session; ${why}.<br>${earlier}<i>Click to select its incident</i>`;
+      }),
+      hoverinfo:'text', hoverlabel:{bgcolor:c.hoverBg, bordercolor:'#A83232', font:{color:c.ink, size:12, family:FONT_UI}},
+      showlegend:false,
+    } : null;
     const selectedTowers = selectedSiteIds ? active.filter(isSelectedTower) : [];
     const selectedTrace = selectedTowers.length ? {
       type:'scattergl', mode:'markers', x: selectedTowers.map(t=>t.lon), y: selectedTowers.map(t=>t.lat),
@@ -1493,8 +1563,20 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     const activeHalo = active.length ? markerHalo(activeTrace.x, activeTrace.y, activeTrace.marker.size, 'circle', c) : null;
     const lisaHalo = lisaTrace ? ringHalo(lisaTrace.x, lisaTrace.y, lisaTrace.marker.size, 3.5, c) : null;
     const selectedHalo = selectedTrace ? ringHalo(selectedTrace.x, selectedTrace.y, selectedTrace.marker.size, 3, c) : null;
-    const traces = [...basemapTraces(c), base, activeHalo, activeTrace, lisaHalo, lisaTrace, alertTrace,
-                    selectedHalo, selectedTrace].filter(Boolean);
+    const clearedHalo = clearedTrace ? ringHalo(clearedTrace.x, clearedTrace.y, clearedTrace.marker.size, 2.5, c, 'diamond-open') : null;
+    const traces = [...basemapTraces(c), base, activeHalo, activeTrace, lisaHalo, lisaTrace, clearedHalo, clearedTrace,
+                    alertTrace, selectedHalo, selectedTrace].filter(Boolean);
+    // Legend: an entry appears only while a marker of that type is actually drawn (updated on every
+    // call, before the redraw-skip below, so it never lags the map).
+    const vis = legendVisibility({lisaQuadrants: lisaSig.map(t => lisaByTower.get(t.site_id).quadrant),
+                                  alertingNowCount: alerting.length, clearedCount: cleared.length,
+                                  selectedCount: selectedTowers.length});
+    Object.keys(vis).forEach(k => { const el = document.querySelector(`.lisa-legend [data-legend="${k}"]`); if(el) el.hidden = !vis[k]; });
+    const noteEl = document.getElementById('legend-cluster-note');
+    if(noteEl){
+      noteEl.hidden = clusterNeed === null;
+      if(clusterNeed !== null) noteEl.textContent = `spatial clusters appear once ${clusterNeed}+ towers are scored`;
+    }
     // Zoom to the selected incident's towers (padded) so its markers are easy to see and
     // click; otherwise the full session extent, same as before.
     const zoomRange = selectedTowers.length ? incidentZoomRange(selectedTowers) : null;
@@ -1507,6 +1589,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       activeTrace.marker.size, activeTrace.text,
       lisaTrace && [lisaTrace.x, lisaTrace.y, lisaTrace.marker.color, lisaTrace.marker.size],
       alertTrace && [alertTrace.x, alertTrace.y, alertTrace.marker.size, alertTrace.text],
+      clearedTrace && [clearedTrace.x, clearedTrace.y, clearedTrace.marker.size, clearedTrace.text],
       selectedTrace && [selectedTrace.x, selectedTrace.y, selectedIncidentId],
     ]));
     if(mapHash === lastMapHash) return;
@@ -1522,7 +1605,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       hovermode:'closest',
       // Wheel / trackpad-pinch zooms (scrollZoom in the config); dragging pans. No drag-select box.
       dragmode:'pan',
-      annotations: basemapPlaceAnnotations(c, [...alerting, ...lisaSig].map(t => ({x: t.lon, y: t.lat}))),
+      annotations: basemapPlaceAnnotations(c, [...alerting, ...cleared, ...lisaSig].map(t => ({x: t.lon, y: t.lat}))),
       images: basemapLayoutImages(),
       // Keeps whatever zoom/pan the user set across the constant stream of redraws; the
       // revision only changes when the selected incident changes, which re-applies the
@@ -1582,6 +1665,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
 
   function renderIncidentQueue(incidents){
     incidentsById = new Map(incidents.map(i => [i.incident_id, i]));
+    incidents.forEach(i => i.towers.forEach(t => { if(t.site_id) everAlerted.add(t.site_id); }));
     if(selectedIncidentId && !incidentsById.has(selectedIncidentId)) selectedIncidentId = null;
     if(!incidents.length){
       incidentQueueEl.innerHTML = `<div class="incident-empty">No incidents this session -- towers are quiet, or no alerting events have been scored yet.</div>`;
@@ -2051,6 +2135,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     try{
       const d = await api('/spatial/autocorrelation').then(r => r.json());
       lisaByTower.clear();
+      clusterNeed = clustersNeedMoreTowers(d) ? d.min_required : null;
       if(d.computable){
         moranIEl.textContent = d.global_moran_i.toFixed(3);
         moranPEl.textContent = d.global_p_value.toFixed(3) + (d.global_p_value < 0.05 ? ' *' : '');
@@ -2126,7 +2211,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
 
       const mapState = await api('/events/map').then(r => r.json());
       const replayStatus = await api('/replay/status').then(r => r.json());
-      replayAttribution = replayStatus.status !== 'idle' ? replayStatus.attribution : null;
+      setReplayAttribution(replayStatus.status !== 'idle' ? replayStatus.attribution : null);
       const recentIngest = mapState.some(e => e.source === 'ingest' &&
         Date.now() - new Date(e.created_at).getTime() <= 120000);
       if(replayStatus.status === 'running') setDataMode('REPLAY - recorded receiver logs, tower attribution SIMULATED');
@@ -2136,8 +2221,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         liveSeverity.set(e.tower_site_id, {
           site_id: e.tower_site_id, name: e.tower_site_name, lat: e.tower_lat, lon: e.tower_lon,
           severity: e.severity, correlation: e.correlation_score ?? 0, event_id: e.id,
-          alert_state: e.alert_state, created_at: e.created_at,
+          alert_state: e.alert_state, created_at: e.created_at, source: e.source,
         });
+        noteEvent(e.tower_site_id, e.source, e.alert_state, e.id);
         eventsById.set(e.id, {
           event_id: e.id, attack_type: e.attack_type, severity: e.severity,
           predicted_label: e.predicted_label, top_features: e.top_features,
@@ -2175,8 +2261,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       liveSeverity.set(ev.tower.site_id, {
         site_id: ev.tower.site_id, name: ev.tower.site_name, lat: ev.tower.lat, lon: ev.tower.lon,
         severity: ev.severity, correlation: ev.correlation_score ?? 0, event_id: ev.event_id,
-        alert_state: ev.alert_state, created_at: ev.created_at,
+        alert_state: ev.alert_state, created_at: ev.created_at, source: eventSourceOf(ev),
       });
+      noteEvent(ev.tower.site_id, eventSourceOf(ev), ev.alert_state, ev.event_id);
       renderLiveMap();
       schedulePriorityRefresh();
       scheduleIncidentRefresh();
@@ -2212,7 +2299,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     const params = new URLSearchParams({speed: speedSelect.value, attribution: 'epicenter'});
     if(runSelect.value) params.set('run_id', runSelect.value);
     const res = await api(`/replay/start?${params}`, {method:'POST'});
-    if(res.ok){ replayAttribution = params.get('attribution'); btnStart.disabled = true; btnStop.disabled = false; setDataMode('REPLAY - recorded receiver logs, tower attribution SIMULATED'); }
+    if(res.ok){ setReplayAttribution(params.get('attribution')); btnStart.disabled = true; btnStop.disabled = false; setDataMode('REPLAY - recorded receiver logs, tower attribution SIMULATED'); }
     else { const err = await res.json().catch(()=>({detail:res.statusText})); setStatus('bad', err.detail); }
   });
   btnStop.addEventListener('click', async () => {

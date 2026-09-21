@@ -22,7 +22,7 @@ def test_queue_help_describes_time_and_distance_grouping(client):
 
 def test_alerting_legend_entry_explains_diamonds_versus_incidents(client):
     html = _html(client)
-    m = re.search(r'<span title="([^"]*)"><i class="dia"></i>Alerting \(hysteresis-confirmed\)</span>', html)
+    m = re.search(r'<span data-legend="alerting" hidden title="([^"]*)"><i class="dia"></i>Alerting \(hysteresis-confirmed\)</span>', html)
     assert m, "the Alerting legend entry must carry an explanatory hover title"
     assert "single incident" in m.group(1)
 

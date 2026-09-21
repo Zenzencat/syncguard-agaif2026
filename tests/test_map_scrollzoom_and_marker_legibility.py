@@ -84,4 +84,4 @@ def test_alert_diamond_is_fully_opaque(client):
 def test_place_labels_can_be_lifted_off_the_markers_that_must_stay_visible(client):
     js = _script(client.get("/dashboard").text)
     assert "function basemapPlaceAnnotations(c, avoid)" in js
-    assert "basemapPlaceAnnotations(c, [...alerting, ...lisaSig]" in _function_body(js, "renderLiveMap")
+    assert "basemapPlaceAnnotations(c, [...alerting, ...cleared, ...lisaSig]" in _function_body(js, "renderLiveMap")

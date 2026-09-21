@@ -18,7 +18,9 @@ def _script(html: str) -> str:
 
 def test_alert_pill_is_set_from_the_active_alerts_list_inside_render_live_map(client):
     js = _script(client.get("/dashboard").text)
-    m = re.search(r"const alerting = active\.filter\(t => t\.alert_state === 'alerting'\);"
+    # `alerting` is the ALERTING-NOW list (classifyAlerting): a tower whose last event was
+    # 'alerting' but whose recording has since returned to normal is drawn hollow and not counted.
+    m = re.search(r"const \{alertingNow: alerting, cleared\} = classifyAlerting\(active, latestReplayState, everAlerted\);"
                   r"([\s\S]*?)const alertTrace", js)
     assert m, "expected the alerting-towers list to be computed in renderLiveMap()"
     body = m.group(1)
