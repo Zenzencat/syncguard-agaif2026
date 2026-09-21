@@ -15,7 +15,7 @@ What is REAL here:
     do, it doesn't, regardless of distance.
 
 What is SIMULATED here (see TowerAttributor, SpatiallyPersistentAttributor and
-EpicenterWeightedAttributor below):
+EpicenterRandomWalk below):
   - Which physical tower a given scored event "comes from". The Jammertest 2024 dataset is a
     single receiver's log, not a multi-tower deployment, so there is no real per-event tower
     attribution to use, and no ground-truth fix is possible for any mechanism below -- the
@@ -25,7 +25,7 @@ EpicenterWeightedAttributor below):
     default), `SpatiallyPersistentAttributor` (a biased random walk over real tower geometry
     from a random starting tower, encoding the one real, disclosed assumption that sustained
     attacks persist and drift locally rather than teleporting), and
-    `EpicenterWeightedAttributor` (the same persistent walk, anchored to start at a fixed
+    `EpicenterRandomWalk` (the same persistent walk, anchored to start at a fixed
     simulated epicenter -- what the dashboard's NOC tab requests, so its incident queue has
     something spatially localized to group). All three are clearly SIMULATED and documented
     as such everywhere this module's output surfaces (API response, DB column comments,
@@ -42,6 +42,7 @@ tower (via the live replay/API), how correlated does this tower's neighborhood c
 look?" -- computed fresh from live data every time, not from a fixed assumed origin.
 """
 from __future__ import annotations
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -108,9 +109,29 @@ class TowerAttributor:
             "lon": float(row["lon"]),
         }
 
+    def reset(self) -> None:
+        """Back to tower 0. Called at every replay start so a replay's tower sequence does not
+        depend on how many events an earlier replay happened to consume."""
+        self._next_idx = 0
+
     @property
     def towers(self) -> pd.DataFrame:
         return self._towers
+
+
+# Default seed for the SIMULATED epicenter random walk, so a replay's tower attribution is the
+# same every run. Override with SYNCGUARD_ATTRIBUTION_SEED (an integer).
+DEFAULT_ATTRIBUTION_SEED = 20260921
+
+
+def attribution_seed_from_env() -> int:
+    raw = os.environ.get("SYNCGUARD_ATTRIBUTION_SEED", "").strip()
+    if not raw:
+        return DEFAULT_ATTRIBUTION_SEED
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"SYNCGUARD_ATTRIBUTION_SEED must be an integer, got {raw!r}") from exc
 
 
 ATTRIBUTION_K_NEIGHBORS = 5   # deliberately named distinctly from api/spatial_stats.py's
@@ -152,12 +173,13 @@ class SpatiallyPersistentAttributor:
                  k: int = ATTRIBUTION_K_NEIGHBORS, seed: int | None = None,
                  start_tower_key: str | None = None):
         """`start_tower_key`: if given, the walk's first tower is fixed to this tower_key
-        instead of a uniformly random one -- used by EpicenterWeightedAttributor below to
+        instead of a uniformly random one -- used by EpicenterRandomWalk below to
         anchor the walk's start at a fixed simulated epicenter while keeping this class's
         real k-NN persistence for every step after that."""
         self._towers = towers.reset_index(drop=True)
         self._stay_prob = stay_prob
         self._k = k
+        self._seed = seed
         self._rng = np.random.default_rng(seed)
         self._current_idx: int | None = None
         self._start_idx: int | None = None
@@ -185,6 +207,15 @@ class SpatiallyPersistentAttributor:
             neighbor_weights[i] = inv / inv.sum()
         return neighbor_idx, neighbor_weights
 
+    def reset(self) -> None:
+        """Back to the start of the walk: forget the current tower and re-seed the RNG, so one
+        seed always gives one tower sequence. Called at every replay start. Before this, the walk
+        carried on from wherever the previous replay left it, on a random stream nothing had
+        seeded, so two replays of the same scenario got different tower sequences. With
+        seed=None the RNG is fresh OS entropy again, i.e. still non-deterministic by choice."""
+        self._rng = np.random.default_rng(self._seed)
+        self._current_idx = None
+
     def next_tower(self) -> dict:
         if self._current_idx is None:
             self._current_idx = (self._start_idx if self._start_idx is not None
@@ -206,7 +237,7 @@ class SpatiallyPersistentAttributor:
         return self._towers
 
 
-class EpicenterWeightedAttributor(SpatiallyPersistentAttributor):
+class EpicenterRandomWalk(SpatiallyPersistentAttributor):
     """SIMULATED, alternative to TowerAttributor: a real k-NN persistent walk (see
     SpatiallyPersistentAttributor above -- same stay/move mechanism, same real haversine
     neighbor table) anchored to start at a fixed simulated epicenter instead of a uniformly
@@ -216,6 +247,12 @@ class EpicenterWeightedAttributor(SpatiallyPersistentAttributor):
     towers AND nearby time to join one incident) has something spatially coherent to group
     under live replay -- round-robin stays the API default and is what tests / the
     spatial-statistics results still exercise.
+
+    Named for what it does now: a seeded random walk that starts at the epicenter. (It used to
+    be called EpicenterRandomWalk, but nothing is weighted by distance from the epicenter
+    any more -- the v1 mechanism below was replaced.) Deterministic by default: it is seeded
+    (DEFAULT_ATTRIBUTION_SEED, override with SYNCGUARD_ATTRIBUTION_SEED) and reset() at every
+    replay start, so two replays of one scenario produce the same tower sequence.
 
     v1 of this class independently redrew a tower every event, weighted by
     exp(-distance_from_epicenter_km / decay_km) (the same decay narrative

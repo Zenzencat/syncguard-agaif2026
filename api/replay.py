@@ -100,11 +100,11 @@ DEFAULT_ATTRIBUTION = "round_robin"
 class ReplayManager:
     def __init__(self, model_service, event_store, attributors: dict, correlation_engine, bus: EventBus):
         """`attributors`: {name -> attributor instance}, e.g. {"round_robin": TowerAttributor(...),
-        "epicenter": EpicenterWeightedAttributor(...)}. Must contain DEFAULT_ATTRIBUTION.
+        "epicenter": EpicenterRandomWalk(...)}. Must contain DEFAULT_ATTRIBUTION.
         Selected per replay by POST /replay/start's `attribution` query param -- round_robin
         stays the API default (what tests and the spatial-statistics results exercise); the
         dashboard's NOC tab requests "epicenter" so its incident queue has something spatially
-        localized to group -- see api/spatial.py::EpicenterWeightedAttributor."""
+        localized to group -- see api/spatial.py::EpicenterRandomWalk."""
         self._model = model_service
         self._store = event_store
         self._attributors = attributors
@@ -148,6 +148,12 @@ class ReplayManager:
                              f"(known: {sorted(self._attributors)})")
         self._attribution = attribution
         self._attributor = self._attributors[attribution]
+        # Every replay starts its SIMULATED tower attribution from the beginning (round-robin from
+        # tower 0, the epicenter walk from its seed at the epicenter), so replaying the same
+        # scenario twice gives the same tower sequence. Attributors without reset() are left alone.
+        reset = getattr(self._attributor, "reset", None)
+        if callable(reset):
+            reset()
         self._run_id, self._speed = resolved_run_id, max(speed, 0.1)
         self._rows_replayed = 0
         self._error = None

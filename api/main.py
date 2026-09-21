@@ -27,7 +27,8 @@ from api.schemas import (TelemetryInput, ScoreResponse, HealthResponse, Autocorr
                          FeedbackRecord, FeedbackSummary, IncidentsResponse)
 from api.model_service import ModelService, ModelNotFoundError
 from api.db import EventStore, INCIDENT_EVENT_CAP
-from api.spatial import load_towers, TowerAttributor, EpicenterWeightedAttributor, LiveCorrelationEngine
+from api.spatial import (load_towers, TowerAttributor, EpicenterRandomWalk, LiveCorrelationEngine,
+                         attribution_seed_from_env)
 from api.exposure import attach_exposure, pop_2km_by_tower, rank_priority, records_with_nulls
 from api.incidents import build_incidents, INCIDENT_WINDOW_SECONDS, INCIDENT_DISTANCE_KM
 from api.spatial_stats import compute_autocorrelation, warmup as warmup_autocorrelation
@@ -103,13 +104,13 @@ async def lifespan(app: FastAPI):
     towers = attach_exposure(load_towers())
     app.state.towers = towers
     app.state.tower_attributor = TowerAttributor(towers)
-    # Named replay attribution modes -- see api/spatial.py::EpicenterWeightedAttributor and
+    # Named replay attribution modes -- see api/spatial.py::EpicenterRandomWalk and
     # api/replay.py::ReplayManager. round_robin is the API default; the dashboard's NOC tab
     # requests epicenter so its incident queue groups into a small number of localized
     # incidents instead of one spanning all 136 towers.
     app.state.replay_attributors = {
         "round_robin": app.state.tower_attributor,
-        "epicenter": EpicenterWeightedAttributor(towers),
+        "epicenter": EpicenterRandomWalk(towers, seed=attribution_seed_from_env()),
     }
     app.state.correlation_engine = LiveCorrelationEngine(towers, app.state.event_store)
     app.state.event_bus = EventBus()

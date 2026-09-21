@@ -206,6 +206,7 @@ pointed at a *different* API host needs `SYNCGUARD_CORS_ORIGINS` set; and the co
 | `SYNCGUARD_COOKIE_SECURE` | `0` | Set to `1` behind TLS. |
 | `SYNCGUARD_LOG_LEVEL` | `INFO` | Log level for the JSON logs. |
 | `SYNCGUARD_DB_PATH` | `data/syncguard.db` | Override the SQLite location. |
+| `SYNCGUARD_ATTRIBUTION_SEED` | `20260921` | Integer seed for the SIMULATED epicenter-walk tower attribution the dashboard's replay uses. The walk is reset to the epicenter and re-seeded at every replay start, so replaying one scenario twice gives the same tower sequence. |
 
 ### Model version tag
 

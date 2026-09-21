@@ -2292,7 +2292,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
   btnConnect.addEventListener('click', connect);
   btnStart.addEventListener('click', async () => {
     // NOC's incident queue groups by time AND distance (api/incidents.py), so replay uses the
-    // SIMULATED epicenter-weighted attribution (api/spatial.py::EpicenterWeightedAttributor)
+    // SIMULATED epicenter random-walk attribution (api/spatial.py::EpicenterRandomWalk)
     // instead of round-robin -- round-robin scatters events across all 136 towers regardless
     // of proximity, which under distance-based grouping fragments into one incident per
     // reading instead of a small number of localized ones. Still SIMULATED either way.

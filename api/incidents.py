@@ -15,7 +15,7 @@ incidents. This module adds a simple, explicitly-approved grouping rule on top o
      attribution, a sustained alert scores events across many different towers within
      milliseconds of each other, so a time-only window never breaks and the whole scenario
      collapses into one incident spanning all towers. Requiring both dimensions fixes that,
-     and pairs with EpicenterWeightedAttributor (api/spatial.py), an alternative replay
+     and pairs with EpicenterRandomWalk (api/spatial.py), an alternative replay
      attribution mode that concentrates events near a fixed simulated epicenter instead of
      scattering them round-robin, so nearby-in-time events are also plausibly nearby in space.
      This is still a demo heuristic, not a real clustering algorithm: real deployments would

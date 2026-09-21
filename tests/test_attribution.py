@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from api.spatial import EpicenterWeightedAttributor, SpatiallyPersistentAttributor
+from api.spatial import EpicenterRandomWalk, SpatiallyPersistentAttributor
 
 
 def _towers() -> pd.DataFrame:
@@ -23,24 +23,24 @@ def _towers() -> pd.DataFrame:
 
 
 def test_epicenter_is_the_real_tower_nearest_the_centroid():
-    attributor = EpicenterWeightedAttributor(_towers(), seed=1)
+    attributor = EpicenterRandomWalk(_towers(), seed=1)
     assert attributor.epicenter_tower_key == "center"
 
 
 def test_first_event_lands_on_the_epicenter():
-    attributor = EpicenterWeightedAttributor(_towers(), seed=1)
+    attributor = EpicenterRandomWalk(_towers(), seed=1)
     first = attributor.next_tower()
     assert first["site_id"] == "center"
 
 
 def test_stay_probability_one_never_moves():
-    attributor = EpicenterWeightedAttributor(_towers(), stay_prob=1.0, seed=1)
+    attributor = EpicenterRandomWalk(_towers(), stay_prob=1.0, seed=1)
     towers = [attributor.next_tower()["site_id"] for _ in range(10)]
     assert towers == ["center"] * 10
 
 
 def test_stay_probability_zero_always_moves_to_a_real_neighbor():
-    attributor = EpicenterWeightedAttributor(_towers(), stay_prob=0.0, k=3, seed=1)
+    attributor = EpicenterRandomWalk(_towers(), stay_prob=0.0, k=3, seed=1)
     towers = [attributor.next_tower()["site_id"] for _ in range(10)]
     assert towers[0] == "center"
     assert all(t not in ("far", "far2") for t in towers), "the distant outliers should never be a nearest neighbor of the cluster"
@@ -48,13 +48,13 @@ def test_stay_probability_zero_always_moves_to_a_real_neighbor():
 
 
 def test_deterministic_with_a_fixed_seed():
-    seq_a = [EpicenterWeightedAttributor(_towers(), seed=42).next_tower()["site_id"] for _ in range(8)]
-    seq_b = [EpicenterWeightedAttributor(_towers(), seed=42).next_tower()["site_id"] for _ in range(8)]
+    seq_a = [EpicenterRandomWalk(_towers(), seed=42).next_tower()["site_id"] for _ in range(8)]
+    seq_b = [EpicenterRandomWalk(_towers(), seed=42).next_tower()["site_id"] for _ in range(8)]
     assert seq_a == seq_b
 
 
 def test_next_tower_shape_matches_other_attributors():
-    attributor = EpicenterWeightedAttributor(_towers(), seed=1)
+    attributor = EpicenterRandomWalk(_towers(), seed=1)
     tower = attributor.next_tower()
     assert set(tower.keys()) == {"site_id", "site_name", "lat", "lon"}
 
