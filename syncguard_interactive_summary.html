@@ -127,8 +127,8 @@
   .shap-wrap{min-height:0; display:flex; flex-direction:column;}
 
   /* Incident queue + detail */
-  .incident-wrap{flex:1.3 1 0; min-height:0; display:flex; flex-direction:column;}
-  .incident-detail-wrap{flex:1.1 1 0; min-height:0; display:flex; flex-direction:column;}
+  .incident-wrap{flex:0.9 1 0; min-height:0; display:flex; flex-direction:column;}
+  .incident-detail-wrap{flex:1.9 1 0; min-height:0; display:flex; flex-direction:column;}
   #incident-queue{flex:1 1 auto; min-height:0; overflow-y:auto; background:var(--panel-2); border:1px solid var(--rule-soft);}
   .incident-row{display:grid; grid-template-columns:1fr auto; gap:2px 10px; padding:7px 10px; border-bottom:1px solid var(--rule-soft); cursor:pointer;}
   .incident-row:last-child{border-bottom:0;}
@@ -144,6 +144,23 @@
   #incident-detail{flex:1 1 auto; min-height:0; overflow-y:auto; background:var(--panel-2); border:1px solid var(--rule-soft); padding:9px 12px; font-size:12.5px;}
   #incident-detail .ph{color:var(--ink-2);}
   .incident-signals .shap-bar-row{grid-template-columns:130px 1fr 54px;}
+  /* Plain-language signal rows (incident detail). Direction = left edge colour + verdict colour. */
+  #incident-detail h4{margin:8px 0 3px;}
+  .ps-note{font-size:10.5px; color:var(--muted); margin:0 0 4px; line-height:1.3;}
+  .plain-signals{display:flex; flex-direction:column; gap:4px; margin:0 0 2px;}
+  .plain-signal{padding:4px 8px; background:var(--inset); border:1px solid var(--rule-soft); border-left:3px solid var(--muted);}
+  .plain-signal.attack{border-left-color:var(--red);} .plain-signal.clean{border-left-color:var(--blue);}
+  .ps-head{display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap;}
+  .ps-name{font-weight:600; color:var(--ink); font-size:12.5px;}
+  .ps-verdict{font-size:11.5px; color:var(--muted); white-space:nowrap;}
+  .ps-verdict.attack{color:var(--red);} .ps-verdict.clean{color:var(--blue);}
+  .ps-verdict.strong{font-weight:700;}
+  .ps-desc{font-size:11px; color:var(--ink-2); margin-top:1px; line-height:1.3;}
+  .tech-detail{margin:2px 0 4px; font-size:11px; color:var(--muted);}
+  .tech-detail summary{cursor:pointer; user-select:none; padding:2px 0;}
+  .tech-detail table{border-collapse:collapse; width:100%; margin:4px 0; font-size:11px;}
+  .tech-detail th,.tech-detail td{text-align:left; padding:2px 8px 2px 0; border-bottom:1px solid var(--rule-soft); font-family:var(--font-mono);}
+  .tech-detail th{color:var(--muted); font-weight:600;}
   .incident-impact{display:flex; flex-direction:column; gap:3px; font-size:12px; margin:8px 0; padding:7px 9px; background:var(--wash); border-left:3px solid var(--orange);}
   .incident-checklist{margin:8px 0; font-size:12px;}
   .incident-checklist ul{margin:4px 0 0; padding-left:18px;}
@@ -1138,6 +1155,153 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       : {title:rawId || towerName || '—', subtitle:towerName || ''};
   }
 
+  // ---- plain-language signals BEGIN (pure helpers; behaviour tested with node in tests/test_plain_language_signals.py) ----
+  // One lookup table for the 23 detector features. Names/descriptions were checked against
+  // extract_features.py, INGESTION_CONTRACT.md and api/schemas.py, not written from the raw column
+  // names. JSON-compatible on purpose so a test can parse it and compare it with the schema.
+  const FEATURE_LABELS = /*FEATURE_LABELS_BEGIN*/{
+      "agc_cnt_mean": {
+          "name": "Signal-boost level",
+          "desc": "Roughly how much the receiver is amplifying the incoming radio signal (its automatic gain reading); it moves when the radio environment changes.",
+          "unit": ""
+      },
+      "jam_ind_mean": {
+          "name": "Receiver's own jamming alarm",
+          "desc": "The receiver hardware's built-in interference reading; higher means it is detecting more radio interference.",
+          "unit": ""
+      },
+      "snr_l1_mean": {
+          "name": "Signal clarity (average)",
+          "desc": "How clear the satellite signals are on average across all tracked satellites; lower means weaker or noisier.",
+          "unit": "dB-Hz"
+      },
+      "snr_l1_std": {
+          "name": "Signal clarity (spread)",
+          "desc": "How much signal clarity differs from one satellite to another at this moment.",
+          "unit": "dB-Hz"
+      },
+      "snr_l1_min": {
+          "name": "Signal clarity (weakest)",
+          "desc": "Signal clarity of the single weakest satellite being tracked right now.",
+          "unit": "dB-Hz"
+      },
+      "noise_per_ms_mean": {
+          "name": "Background radio noise",
+          "desc": "How much radio noise the receiver's front end is picking up.",
+          "unit": ""
+      },
+      "n_sats_l1": {
+          "name": "Satellites tracked",
+          "desc": "How many satellites the receiver is tracking, across all satellite systems; usually more than it uses for the position fix.",
+          "unit": ""
+      },
+      "numSV": {
+          "name": "Satellites used for the fix",
+          "desc": "How many of the tracked satellites the receiver actually used to calculate its position.",
+          "unit": ""
+      },
+      "gSpeed": {
+          "name": "Reported ground speed",
+          "desc": "How fast the receiver says it is moving over the ground; a fixed site should read near zero.",
+          "unit": "m/s"
+      },
+      "velN": {
+          "name": "Reported speed northward",
+          "desc": "The northward part of the receiver's reported movement (negative means southward); a fixed site should read near zero.",
+          "unit": "m/s"
+      },
+      "velE": {
+          "name": "Reported speed eastward",
+          "desc": "The eastward part of the receiver's reported movement (negative means westward); a fixed site should read near zero.",
+          "unit": "m/s"
+      },
+      "velD": {
+          "name": "Reported speed downward",
+          "desc": "The downward part of the receiver's reported movement (negative means upward); a fixed site should read near zero.",
+          "unit": "m/s"
+      },
+      "hAcc": {
+          "name": "Horizontal position uncertainty",
+          "desc": "The receiver's own estimate of how far off its horizontal position could be; self-reported, not measured truth, and higher means less certain.",
+          "unit": "m"
+      },
+      "vAcc": {
+          "name": "Vertical position uncertainty",
+          "desc": "The receiver's own estimate of how far off its height could be; self-reported, not measured truth, and higher means less certain.",
+          "unit": "m"
+      },
+      "sAcc": {
+          "name": "Speed uncertainty",
+          "desc": "The receiver's own estimate of how far off its reported speed could be; self-reported, not measured truth.",
+          "unit": "m/s"
+      },
+      "headAcc": {
+          "name": "Direction uncertainty",
+          "desc": "The receiver's own estimate of how far off its reported direction of movement could be; self-reported, not measured truth.",
+          "unit": "deg"
+      },
+      "pDOP": {
+          "name": "Satellite geometry quality",
+          "desc": "How well spread across the sky the satellites are for working out a position (the receiver's own figure; lower means better spread).",
+          "unit": ""
+      },
+      "pos_dev_m": {
+          "name": "Position drift from start",
+          "desc": "How far the reported position has moved from where the receiver was during its first minute; only meaningful for a fixed receiver.",
+          "unit": "m"
+      },
+      "fixType": {
+          "name": "Type of position fix",
+          "desc": "What kind of position solution the receiver has: none, 2D or 3D.",
+          "unit": ""
+      },
+      "doppler_l1_mean": {
+          "name": "Signal frequency shift (average)",
+          "desc": "The average small shift in satellite signal frequency, caused mainly by the satellites' movement.",
+          "unit": "Hz"
+      },
+      "doppler_l1_std": {
+          "name": "Signal frequency shift (spread)",
+          "desc": "How much that frequency shift differs from one satellite to another at this moment.",
+          "unit": "Hz"
+      },
+      "pr_doppler_residual_mean": {
+          "name": "Motion-consistency check (average)",
+          "desc": "Checks whether each satellite's measured distance change matches its measured frequency shift — genuine signals always agree; spoofed ones can drift out of sync.",
+          "unit": "m/s"
+      },
+      "pr_doppler_residual_std": {
+          "name": "Motion-consistency check (spread)",
+          "desc": "Checks whether each satellite's measured distance change matches its measured frequency shift — genuine signals always agree; spoofed ones can drift out of sync.",
+          "unit": "m/s"
+      }
+  }/*FEATURE_LABELS_END*/;
+
+  // Unknown feature (e.g. the model gains one): show its raw name rather than hide it.
+  function friendlyFeature(feature){
+    const hit = Object.prototype.hasOwnProperty.call(FEATURE_LABELS, feature) ? FEATURE_LABELS[feature] : null;
+    return hit ? {name: hit.name, desc: hit.desc, unit: hit.unit || '', known: true}
+               : {name: String(feature), desc: '', unit: '', known: false};
+  }
+
+  // Direction = the SHAP value's sign (positive pushes toward "attack", negative toward "clean").
+  // Strength is RELATIVE to the signals shown, not an absolute cutoff: a signal is "strongly" only
+  // when it outweighs all the other shown signals combined (more than half of the shown SHAP
+  // magnitude), so at most one row can be strong and three near-equal signals are all plain.
+  // The model is binary (attack vs clean), so the wording says "an attack", never a specific type.
+  function signalStrengths(topFeatures){
+    const mags = topFeatures.map(f => Math.abs(Number(f.shap_value) || 0));
+    const total = mags.reduce((a, b) => a + b, 0);
+    return topFeatures.map((f, i) => {
+      const v = Number(f.shap_value) || 0;
+      const strong = mags[i] > total - mags[i];
+      if(v === 0) return {tone:'neutral', strong:false, phrase:'Did not push the verdict either way'};
+      if(v > 0) return {tone:'attack', strong, phrase: strong ? 'Strongly suggests an attack' : 'Suggests an attack'};
+      return {tone:'clean', strong, phrase: strong ? 'Strongly points away from an attack' : 'Points away from an attack'};
+    });
+  }
+  // ---- plain-language signals END ----
+
   function featurePhrase(feature){
     const f = String(feature || '').toLowerCase();
     if(f.startsWith('agc_')) return 'receiver gain control';
@@ -1491,6 +1655,34 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     <div class="note-sm">Suggested checklist - not validated with an operator.</div>
   </div>`;
 
+  // Plain-language view of the top signals (default) with the raw feature names and exact SHAP
+  // values one click away in "Technical detail". Same data as before -- only how it is shown.
+  let techDetailOpen = false;
+  function plainSignalsHtml(shown, eventId){
+    const strengths = signalStrengths(shown);
+    const rows = shown.map((f, i) => {
+      const fl = friendlyFeature(f.feature), s = strengths[i];
+      return `<div class="plain-signal ${s.tone}">
+        <div class="ps-head"><span class="ps-name">${escapeHtml(fl.name)}</span><span class="ps-verdict ${s.tone}${s.strong ? ' strong' : ''}">${escapeHtml(s.phrase)}</span></div>
+        <div class="ps-desc">${escapeHtml(fl.desc || featurePhrase(f.feature))}</div>
+      </div>`;
+    }).join('');
+    const techRows = shown.map(f => {
+      const fl = friendlyFeature(f.feature);
+      const val = (f.feature_value === null || f.feature_value === undefined) ? '—'
+                  : `${Number(f.feature_value).toFixed(3)}${fl.unit ? ' ' + escapeHtml(fl.unit) : ''}`;
+      const sv = Number(f.shap_value);
+      return `<tr><td><code>${escapeHtml(f.feature)}</code></td><td>${val}</td><td>${sv >= 0 ? '+' : ''}${sv.toFixed(4)}</td><td>${escapeHtml(f.direction || (sv >= 0 ? 'toward attack' : 'toward clean'))}</td></tr>`;
+    }).join('');
+    return `<div class="ps-note">How each signal pushed the verdict on the peak reading (#${escapeHtml(eventId)}). “Strongly” = outweighs the other two combined.</div>
+      <div class="plain-signals">${rows}</div>
+      <details class="tech-detail"${techDetailOpen ? ' open' : ''}>
+        <summary>Technical detail</summary>
+        <table><thead><tr><th>Feature</th><th>Value</th><th>SHAP</th><th>Pushes</th></tr></thead><tbody>${techRows}</tbody></table>
+        <div class="note-sm">Exact Tree SHAP over the shipped RandomForest: each value is that feature's signed contribution to the attack probability for this one reading (positive = toward attack).</div>
+      </details>`;
+  }
+
   async function renderIncidentDetail(inc){
     let topFeatures = incidentSignals.get(inc.incident_id);
     let explainError = null;
@@ -1520,7 +1712,7 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
       : `${Math.round(inc.max_pop_2km).toLocaleString()} est. within 2 km (highest single tower, not summed)`;
 
     const signalsHtml = topFeatures
-      ? `<div class="incident-signals">${shapBarsHtml(topFeatures.slice(0,3))}</div>`
+      ? plainSignalsHtml(topFeatures.slice(0,3), inc.top_event_id)
       : `<span class="ph">${escapeHtml(explainError ? `Could not load signals: ${explainError}` : 'No stored signals for this event.')}</span>`;
 
     incidentDetailEl.innerHTML = `
@@ -1546,6 +1738,8 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
         <button type="button" class="btn-copy" id="incident-copy-btn">Copy incident summary</button>
       </div>
     `;
+    const techDetail = incidentDetailEl.querySelector('.tech-detail');
+    if(techDetail) techDetail.addEventListener('toggle', () => { techDetailOpen = techDetail.open; });
     wireIncidentFeedback(inc.top_event_id, inc.incident_id);
     const copyBtn = document.getElementById('incident-copy-btn');
     if(copyBtn) copyBtn.addEventListener('click', () => copyIncidentSummary(inc));
@@ -1625,8 +1819,9 @@ document.addEventListener('themechange', () => { renderTimestep(currentTimestep)
     const start = new Date(inc.start_time).toLocaleString();
     const dur = inc.duration_seconds < 1 ? '<1s' : `${Math.round(inc.duration_seconds)}s`;
     const features = incidentSignals.get(inc.incident_id) || [];
-    const signals = features.slice(0,3)
-      .map(f => `  - ${featurePhrase(f.feature)} (${f.direction})`).join('\n');
+    const shownSignals = features.slice(0,3), strengths = signalStrengths(shownSignals);
+    const signals = shownSignals
+      .map((f, i) => `  - ${friendlyFeature(f.feature).name}: ${strengths[i].phrase.toLowerCase()}`).join('\n');
     const popLine = inc.max_pop_2km === null || inc.max_pop_2km === undefined
       ? 'population unavailable'
       : `~${Math.round(inc.max_pop_2km).toLocaleString()} est. within 2km of the highest-exposure tower (not summed)`;
