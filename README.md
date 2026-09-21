@@ -467,9 +467,9 @@ not because redistribution rights have been formally confirmed — see
 image rendered from OpenStreetMap data (a Kubu Raya / Pontianak extract fetched once from the
 Overpass API at build time, then styled and drawn offline by `tools/build_basemap_raster.py`).
 The map data is © OpenStreetMap contributors, available under the Open Database License
-(ODbL) — <https://www.openstreetmap.org/copyright>. The dashboard shows this credit in the
-map-corner caption and the page footer, and [`assets/OFFLINE_BASEMAP_ATTRIBUTION.md`](assets/OFFLINE_BASEMAP_ATTRIBUTION.md)
-documents the sources. A smaller vector layer built from the same OpenStreetMap data
+(ODbL) — <https://www.openstreetmap.org/copyright>. The dashboard shows this credit in a
+map-corner caption under both maps (NOC and Spatial analysis) and in the page footer, and
+[`assets/OFFLINE_BASEMAP_ATTRIBUTION.md`](assets/OFFLINE_BASEMAP_ATTRIBUTION.md) documents the sources. A smaller vector layer built from the same OpenStreetMap data
 (`tools/build_basemap.py`) is kept only as a fallback, and a Natural Earth (public-domain)
 layer as a last resort. Nothing is fetched at runtime.
 

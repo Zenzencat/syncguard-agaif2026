@@ -121,6 +121,8 @@
   .map-col{grid-column:1; grid-row:2; display:flex; flex-direction:column; min-height:0; gap:5px;}
   .side-col{grid-column:2; grid-row:2; display:flex; flex-direction:column; min-height:0; gap:7px;}
   .map-attribution{font-size:10px; color:var(--muted);}
+  /* Same caption as the NOC map; the panel grid gap is 7px vs the NOC column's 5px, so pull it up 2px. */
+  .panel-map > .map-attribution{margin-top:-2px;}
   .log-wrap{min-height:0; display:flex; flex-direction:column;}
   .shap-wrap{min-height:0; display:flex; flex-direction:column;}
 
@@ -169,7 +171,7 @@
   .raw-log-details[open] .shap-wrap{flex:1 1 0; min-height:0;}
 
   /* Severity map panel */
-  .panel-map{grid-template-columns:1fr; grid-template-rows:auto auto auto minmax(0,1fr) auto; gap:7px; padding:9px clamp(14px,3vw,32px) 11px;}
+  .panel-map{grid-template-columns:1fr; grid-template-rows:auto auto auto minmax(0,1fr) auto auto; gap:7px; padding:9px clamp(14px,3vw,32px) 11px;}
   .spatial-analysis{display:flex; align-items:center; gap:12px 28px; flex-wrap:wrap; padding:6px 10px; background:var(--wash); border-left:3px solid var(--orange);}
   .spatial-analysis .note{font-size:11px; color:var(--muted); max-width:760px;}
 
@@ -529,6 +531,7 @@
       <span class="note">Simulated attribution; result reflects the recording's own time pattern, not confirmed spatial spread.</span>
     </div>
     <div class="chart-fill"><div id="map"></div></div>
+    <div class="map-attribution">Basemap: raster rendered from OpenStreetMap data, bundled offline · (c) OpenStreetMap contributors (ODbL)</div>
     <div class="map-legend"><span><i class="star">★</i>Epicenter</span><span><i class="rank-badge">#1–5</i>Highest simulated severity</span><span>For exposure-based response ordering, use the Prioritize tab.</span><span class="has-pop"><button type="button" class="info" aria-label="Reading this map: details" aria-expanded="false">ⓘ</button><span class="pop" role="tooltip"><span class="pop-body"><span class="pop-p">Hover a marker for tower, SIMULATED severity at the selected time step, distance from the SIMULATED epicenter, and severity rank. Blue star = SIMULATED epicenter. Labels = current top-5 SIMULATED severity sites; they are not the exposure-based Prioritize ranking.</span></span></span></span></div>
   </section>
 

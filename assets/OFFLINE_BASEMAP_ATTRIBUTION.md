@@ -2,8 +2,9 @@
 
 **The basemap under the tower markers is a raster image rendered from OpenStreetMap data.**
 Data (c) OpenStreetMap contributors, licensed under the Open Database License (ODbL) --
-https://www.openstreetmap.org/copyright. The dashboard credits it in the map-corner caption
-and the page footer ("(c) OpenStreetMap contributors (ODbL)").
+https://www.openstreetmap.org/copyright. The dashboard credits it in a map-corner caption
+under both maps (NOC and Spatial analysis) and in the page footer ("(c) OpenStreetMap
+contributors (ODbL)").
 
 `offline_basemap.geojson` carries two things for the Kubu Raya/Pontianak tower-map bounding box
 (the 136 real tower locations' extent plus a 0.05 degree margin):
@@ -29,7 +30,8 @@ and the page footer ("(c) OpenStreetMap contributors (ODbL)").
   data is a Produced Work; the attribution is kept exactly as required, and the raw OSM
   extracts used to draw it are cached locally in `tools/basemap_cache/` (not part of the
   served asset).
-- Attribution required and shown: dashboard footer and a map-corner caption, both crediting
+- Attribution required and shown: dashboard footer and a map-corner caption under each of the
+  two maps (NOC and Spatial analysis), all crediting
   "(c) OpenStreetMap contributors (ODbL)" and stating that the basemap is a raster rendered
   from OpenStreetMap data
 - Vector categories: `water`, `coastline`, `river` (named rivers/canals only -- unnamed

@@ -115,3 +115,20 @@ def test_no_new_network_references_in_the_dashboard(client):
     for host in ("tile.openstreetmap.org", "overpass-api.de", "api.mapbox.com", "maptiler.com",
                  "basemaps.cartocdn.com", "stadiamaps.com", "openstreetmap.ru", "kumi.systems"):
         assert host not in html.lower(), f"dashboard must not reference {host}"
+
+
+def test_both_maps_carry_the_same_corner_caption(client):
+    """The NOC map and the Spatial analysis map both draw the OSM raster, so each must carry the
+    same map-corner credit (in addition to the footer), not just the NOC one."""
+    html = client.get("/dashboard").text
+    caption = re.compile(r'<div class="map-attribution">([^<]*)</div>')
+    texts = {}
+    for tab in ("tab-live", "tab-map"):
+        m = re.search(r'<section[^>]*id="' + tab + r'"[^>]*>(.*?)</section>', html, re.S)
+        assert m, f"expected the {tab} panel"
+        found = caption.findall(m.group(1))
+        assert len(found) == 1, f"{tab} must have exactly one map-corner caption, found {len(found)}"
+        texts[tab] = found[0]
+    assert texts["tab-live"] == texts["tab-map"]
+    assert "Basemap: raster rendered from OpenStreetMap data, bundled offline" in texts["tab-map"]
+    assert ATTRIBUTION in texts["tab-map"]
